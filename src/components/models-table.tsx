@@ -680,72 +680,86 @@ export function ModelsTable({
 
         {error ? <div className="console-error">{error}</div> : null}
 
-        <div className="table-header">
-          <HeaderButton activeSort={sort} sortKey="provider" onSort={(key) => setSort(nextSort(sort, key))}>
-            provider
-          </HeaderButton>
-          <HeaderButton activeSort={sort} sortKey="model" onSort={(key) => setSort(nextSort(sort, key))}>
-            model
-          </HeaderButton>
-          <HeaderButton activeSort={sort} sortKey="family" onSort={(key) => setSort(nextSort(sort, key))}>
-            family
-          </HeaderButton>
-          <div className="caps-header">caps</div>
-          <HeaderButton
-            activeSort={sort}
-            align="right"
-            sortKey="context"
-            onSort={(key) => setSort(nextSort(sort, key))}
-          >
-            context
-          </HeaderButton>
-          <HeaderButton
-            activeSort={sort}
-            align="right"
-            sortKey="input"
-            onSort={(key) => setSort(nextSort(sort, key))}
-          >
-            in $/m
-          </HeaderButton>
-          <HeaderButton
-            activeSort={sort}
-            align="right"
-            sortKey="output"
-            onSort={(key) => setSort(nextSort(sort, key))}
-          >
-            out $/m
-          </HeaderButton>
-          <HeaderButton
-            activeSort={sort}
-            align="right"
-            sortKey="release"
-            onSort={(key) => setSort(nextSort(sort, key))}
-          >
-            released
-          </HeaderButton>
-        </div>
-
-        <div className="table-scroll" ref={tableScrollRef}>
-          {filteredRows.length === 0 ? (
-            <div className="empty-state">{"// no models match the active query"}</div>
-          ) : (
-            <div
-              className="virtual-space"
-              style={{ height: `${rowVirtualizer.getTotalSize()}px` }}
+        <div className="results-scroll-x">
+          <div className="table-header">
+            <HeaderButton
+              activeSort={sort}
+              sortKey="provider"
+              onSort={(key) => setSort(nextSort(sort, key))}
             >
-              {rowVirtualizer.getVirtualItems().map((virtualRow) => {
-                const row = filteredRows[virtualRow.index];
-                return (
-                  <ModelResultRow
-                    key={row.id}
-                    maxContext={maxContext}
-                    row={row}
-                    start={virtualRow.start}
-                  />
-                );
-              })}
-            </div>
-          )}
+              provider
+            </HeaderButton>
+            <HeaderButton
+              activeSort={sort}
+              sortKey="model"
+              onSort={(key) => setSort(nextSort(sort, key))}
+            >
+              model
+            </HeaderButton>
+            <HeaderButton
+              activeSort={sort}
+              sortKey="family"
+              onSort={(key) => setSort(nextSort(sort, key))}
+            >
+              family
+            </HeaderButton>
+            <div className="caps-header">caps</div>
+            <HeaderButton
+              activeSort={sort}
+              align="right"
+              sortKey="context"
+              onSort={(key) => setSort(nextSort(sort, key))}
+            >
+              context
+            </HeaderButton>
+            <HeaderButton
+              activeSort={sort}
+              align="right"
+              sortKey="input"
+              onSort={(key) => setSort(nextSort(sort, key))}
+            >
+              in $/m
+            </HeaderButton>
+            <HeaderButton
+              activeSort={sort}
+              align="right"
+              sortKey="output"
+              onSort={(key) => setSort(nextSort(sort, key))}
+            >
+              out $/m
+            </HeaderButton>
+            <HeaderButton
+              activeSort={sort}
+              align="right"
+              sortKey="release"
+              onSort={(key) => setSort(nextSort(sort, key))}
+            >
+              released
+            </HeaderButton>
+          </div>
+
+          <div className="table-scroll" ref={tableScrollRef}>
+            {filteredRows.length === 0 ? (
+              <div className="empty-state">{"// no models match the active query"}</div>
+            ) : (
+              <div
+                className="virtual-space"
+                style={{ height: `${rowVirtualizer.getTotalSize()}px` }}
+              >
+                {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+                  const row = filteredRows[virtualRow.index];
+                  return (
+                    <ModelResultRow
+                      key={row.id}
+                      maxContext={maxContext}
+                      row={row}
+                      start={virtualRow.start}
+                    />
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
 
         <footer className="status-bar">

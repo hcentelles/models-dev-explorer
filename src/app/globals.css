@@ -328,6 +328,14 @@ button:disabled {
   padding: 10px 20px;
 }
 
+.results-scroll-x {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
 .table-header,
 .result-row {
   column-gap: 0;
@@ -353,6 +361,7 @@ button:disabled {
   padding: 0 14px;
   position: sticky;
   top: 0;
+  width: max(100%, 980px);
   z-index: 3;
 }
 
@@ -366,8 +375,10 @@ button:disabled {
 
 .table-scroll {
   min-height: 0;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   position: relative;
+  width: max(100%, 980px);
 }
 
 .virtual-space {
