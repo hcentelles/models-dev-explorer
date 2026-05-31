@@ -184,7 +184,11 @@ export function ModelsTable({
   const [isLoading, setIsLoading] = useState(false);
   const [updatedAt, setUpdatedAt] = useState<string | null>(initialFetchedAt);
   const [search, setSearch] = useState("");
+  const [columnSearch, setColumnSearch] = useState("");
   const [filters, setFilters] = useState<Record<string, string>>({});
+  const [hiddenColumns, setHiddenColumns] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
   const [sort, setSort] = useState<SortState>({
     key: "provider.name",
     direction: "asc",
@@ -219,6 +223,22 @@ export function ModelsTable({
   }
 
   const preparedData = useMemo(() => (payload ? prepareData(payload) : null), [payload]);
+  const allColumns = useMemo(() => preparedData?.columns ?? [], [preparedData]);
+  const visibleColumns = useMemo(
+    () => allColumns.filter((column) => !hiddenColumns.has(column)),
+    [allColumns, hiddenColumns],
+  );
+  const matchingColumnOptions = useMemo(() => {
+    const normalizedSearch = columnSearch.trim().toLowerCase();
+
+    if (!normalizedSearch) {
+      return allColumns;
+    }
+
+    return allColumns.filter((column) =>
+      columnLabel(column).toLowerCase().includes(normalizedSearch),
+    );
+  }, [allColumns, columnSearch]);
 
   const filteredRows = useMemo(() => {
     if (!preparedData) {
@@ -258,6 +278,57 @@ export function ModelsTable({
       ? filteredRows
       : filteredRows.slice((safePage - 1) * pageSize, safePage * pageSize);
 
+  function showAllColumns() {
+    setHiddenColumns(new Set());
+  }
+
+  function showPrimaryColumnsOnly() {
+    const primaryVisible = new Set(primaryColumns.filter((column) => allColumns.includes(column)));
+    const nextHiddenColumns = new Set(
+      allColumns.filter((column) => !primaryVisible.has(column)),
+    );
+
+    setHiddenColumns(nextHiddenColumns);
+    setFilters((current) =>
+      Object.fromEntries(
+        Object.entries(current).filter(([column]) => !nextHiddenColumns.has(column)),
+      ),
+    );
+    setSort((current) =>
+      current && nextHiddenColumns.has(current.key) ? null : current,
+    );
+    setPage(1);
+  }
+
+  function toggleColumn(column: string) {
+    const isHidden = hiddenColumns.has(column);
+
+    if (!isHidden && visibleColumns.length <= 1) {
+      return;
+    }
+
+    setHiddenColumns((current) => {
+      const next = new Set(current);
+
+      if (isHidden) {
+        next.delete(column);
+      } else {
+        next.add(column);
+      }
+
+      return next;
+    });
+
+    if (!isHidden) {
+      setFilters((current) =>
+        Object.fromEntries(Object.entries(current).filter(([key]) => key !== column)),
+      );
+      setSort((current) => (current?.key === column ? null : current));
+    }
+
+    setPage(1);
+  }
+
   return (
     <div className="flex min-h-screen flex-col gap-5 px-4 py-5 sm:px-6 lg:px-8">
       <header className="flex flex-col gap-4 border-b border-slate-200 pb-5 lg:flex-row lg:items-end lg:justify-between">
@@ -277,7 +348,11 @@ export function ModelsTable({
             </a>
             {preparedData ? <span>{preparedData.providerCount} providers</span> : null}
             {preparedData ? <span>{preparedData.modelCount} models</span> : null}
-            {preparedData ? <span>{preparedData.columns.length} columns</span> : null}
+            {preparedData ? (
+              <span>
+                {visibleColumns.length} of {preparedData.columns.length} columns shown
+              </span>
+            ) : null}
             {updatedAt ? <span>Fetched {updatedAt}</span> : null}
           </div>
         </div>
@@ -308,6 +383,66 @@ export function ModelsTable({
         <section className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
           {error}
         </section>
+      ) : null}
+
+      {preparedData ? (
+        <details className="rounded-md border border-slate-200 bg-white shadow-sm">
+          <summary className="flex cursor-pointer select-none items-center justify-between gap-3 px-4 py-3 text-sm font-semibold text-slate-950 marker:text-slate-500">
+            <span>Columns</span>
+            <span className="text-xs font-medium text-slate-600">
+              {visibleColumns.length} shown / {preparedData.columns.length} total
+            </span>
+          </summary>
+          <div className="border-t border-slate-200 p-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <input
+                className="h-9 w-full rounded-md border border-slate-300 bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100 sm:max-w-sm"
+                onChange={(event) => setColumnSearch(event.target.value)}
+                placeholder="Find columns"
+                type="search"
+                value={columnSearch}
+              />
+              <div className="flex flex-wrap gap-2">
+                <button
+                  className="h-9 rounded-md border border-slate-300 bg-white px-3 text-sm font-medium text-slate-950 transition hover:border-slate-400 hover:bg-slate-100"
+                  onClick={showAllColumns}
+                  type="button"
+                >
+                  Show all
+                </button>
+                <button
+                  className="h-9 rounded-md border border-slate-300 bg-white px-3 text-sm font-medium text-slate-950 transition hover:border-slate-400 hover:bg-slate-100"
+                  onClick={showPrimaryColumnsOnly}
+                  type="button"
+                >
+                  Primary only
+                </button>
+              </div>
+            </div>
+            <div className="mt-4 grid max-h-56 grid-cols-1 gap-2 overflow-auto pr-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              {matchingColumnOptions.map((column) => {
+                const isVisible = !hiddenColumns.has(column);
+                const isLastVisible = isVisible && visibleColumns.length <= 1;
+
+                return (
+                  <label
+                    className="flex min-h-10 items-start gap-2 rounded-md border border-slate-200 px-3 py-2 text-sm text-slate-800"
+                    key={column}
+                  >
+                    <input
+                      checked={isVisible}
+                      className="mt-0.5 h-4 w-4 accent-emerald-700"
+                      disabled={isLastVisible}
+                      onChange={() => toggleColumn(column)}
+                      type="checkbox"
+                    />
+                    <span className="break-words capitalize">{columnLabel(column)}</span>
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+        </details>
       ) : null}
 
       <section className="flex flex-wrap items-center justify-between gap-3 text-sm text-slate-700">
@@ -367,7 +502,7 @@ export function ModelsTable({
           <table className="min-w-full border-separate border-spacing-0 text-left text-sm">
             <thead className="sticky top-0 z-10 bg-slate-100 text-slate-900 shadow-sm">
               <tr>
-                {preparedData?.columns.map((column) => {
+                {visibleColumns.map((column) => {
                   const sortMarker =
                     sort?.key === column ? (sort.direction === "asc" ? "Asc" : "Desc") : "";
 
@@ -395,7 +530,7 @@ export function ModelsTable({
                 })}
               </tr>
               <tr>
-                {preparedData?.columns.map((column) => (
+                {visibleColumns.map((column) => (
                   <th
                     className="w-56 min-w-56 border-b border-r border-slate-200 bg-white p-2 last:border-r-0"
                     key={`${column}-filter`}
@@ -426,13 +561,15 @@ export function ModelsTable({
               ) : null}
               {!isLoading && preparedData && visibleRows.length === 0 ? (
                 <tr>
-                  <td className="p-6 text-slate-600">No rows</td>
+                  <td className="p-6 text-slate-600" colSpan={visibleColumns.length || 1}>
+                    No rows
+                  </td>
                 </tr>
               ) : null}
               {preparedData
                 ? visibleRows.map((row) => (
                     <tr className="odd:bg-white even:bg-slate-50" key={row.rowId}>
-                      {preparedData.columns.map((column) => (
+                      {visibleColumns.map((column) => (
                         <td
                           className="max-w-56 border-b border-r border-slate-200 px-3 py-2 align-top text-slate-800 last:border-r-0"
                           key={`${row.rowId}-${column}`}
