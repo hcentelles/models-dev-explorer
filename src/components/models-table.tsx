@@ -984,9 +984,9 @@ function ColumnFilterControl({
   return (
     <div className="column-filter-control">
       <input
-        aria-label={`Query filter ${column.label}`}
+        aria-label={`Filter ${column.label}`}
         onChange={(event) => onTextChange(event.target.value)}
-        placeholder="q"
+        placeholder="filter"
         type="search"
         value={textValue}
       />
