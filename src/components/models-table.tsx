@@ -1,8 +1,12 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 
 const SOURCE_URL = "https://models.dev/api.json";
+const MAX_PRICE = 120;
+const INPUT_PRICE_SCALE = 15;
+const OUTPUT_PRICE_SCALE = 120;
 
 type Primitive = string | number | boolean | null | undefined;
 type JsonValue = Primitive | JsonValue[] | { [key: string]: JsonValue };
@@ -13,161 +17,409 @@ type ApiProvider = {
   [key: string]: JsonValue;
 };
 type ApiPayload = Record<string, ApiProvider>;
+type ApiModel = Record<string, JsonValue>;
 type SortDirection = "asc" | "desc";
+type SortKey = "provider" | "model" | "family" | "context" | "input" | "output" | "release";
 type SortState = {
-  key: string;
+  key: SortKey;
   direction: SortDirection;
-} | null;
-type PageSize = (typeof pageSizeOptions)[number];
+};
+type CapabilityKey = "reasoning" | "tool" | "structured" | "vision" | "cache";
+type ModalityKey = "text" | "image" | "audio";
 
 type ModelRow = {
-  rowId: string;
-  values: Record<string, string>;
+  id: string;
+  providerId: string;
+  providerName: string;
+  modelId: string;
+  modelName: string;
+  family: string;
+  releaseDate: string;
+  openWeights: boolean;
+  inputModalities: string[];
+  capabilities: Record<CapabilityKey, boolean>;
+  context: number | null;
+  inputPrice: number | null;
+  outputPrice: number | null;
   searchText: string;
 };
 
-type PreparedData = {
-  columns: string[];
-  rows: ModelRow[];
-  providerCount: number;
-  modelCount: number;
+type ProviderOption = {
+  id: string;
+  name: string;
+  count: number;
 };
 
-const primaryColumns = [
-  "provider.name",
-  "provider.id",
-  "model.name",
-  "model.id",
-  "model.family",
-  "model.release_date",
-  "model.last_updated",
-  "model.open_weights",
-  "model.reasoning",
-  "model.tool_call",
-  "model.structured_output",
-  "model.attachment",
-  "model.modalities.input",
-  "model.modalities.output",
-  "model.limit.context",
-  "model.limit.output",
-  "model.cost.input",
-  "model.cost.output",
-  "provider.api",
-  "provider.doc",
-  "provider.npm",
+const capabilityOptions: Array<{
+  key: CapabilityKey;
+  label: string;
+  glyph: string;
+}> = [
+  { key: "reasoning", label: "Reasoning", glyph: "rsn" },
+  { key: "tool", label: "Tool calling", glyph: "tool" },
+  { key: "structured", label: "Structured output", glyph: "json" },
+  { key: "vision", label: "Vision", glyph: "vis" },
+  { key: "cache", label: "Prompt cache", glyph: "cache" },
 ];
 
-const pageSizeOptions = [100, 250, 500, "all"] as const;
+const modalityOptions: Array<{ key: ModalityKey; label: string }> = [
+  { key: "text", label: "text" },
+  { key: "image", label: "image" },
+  { key: "audio", label: "audio" },
+];
 
-function formatValue(value: JsonValue): string {
-  if (value === null || value === undefined) {
-    return "";
+const providerColors: Record<string, string> = {
+  openai: "#10a37f",
+  anthropic: "#d97757",
+  google: "#4285f4",
+  meta: "#0866ff",
+  mistral: "#fa5410",
+  xai: "#111111",
+  deepseek: "#4d6bfe",
+  qwen: "#615ced",
+  cohere: "#39594d",
+  moonshot: "#16161d",
+  amazon: "#ff9900",
+  "amazon-bedrock": "#ff9900",
+  zai: "#1f6feb",
+  "z.ai": "#1f6feb",
+  "302ai": "#8b5cf6",
+};
+
+function getObject(value: JsonValue): Record<string, JsonValue> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, JsonValue>)
+    : {};
+}
+
+function getString(value: JsonValue): string {
+  return typeof value === "string" ? value : "";
+}
+
+function getBoolean(value: JsonValue): boolean {
+  return value === true;
+}
+
+function getNumber(value: JsonValue): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function getStringArray(value: JsonValue): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : [];
+}
+
+function normalizeProviderKey(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+}
+
+function hashColor(value: string) {
+  let hash = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = value.charCodeAt(index) + ((hash << 5) - hash);
   }
 
-  if (Array.isArray(value)) {
-    return value.map((item) => formatValue(item)).filter(Boolean).join(", ");
+  const hue = Math.abs(hash) % 360;
+  return `hsl(${hue} 78% 58%)`;
+}
+
+function providerColor(providerId: string, providerName: string) {
+  const key = normalizeProviderKey(providerId || providerName);
+  return providerColors[key] ?? hashColor(key || providerName);
+}
+
+function makeRows(payload: ApiPayload | null) {
+  if (!payload) {
+    return {
+      rows: [] as ModelRow[],
+      providers: [] as ProviderOption[],
+      maxContext: 1,
+    };
   }
 
-  if (typeof value === "object") {
-    return JSON.stringify(value);
+  const rows: ModelRow[] = [];
+  const providerCounts = new Map<string, ProviderOption>();
+
+  for (const provider of Object.values(payload)) {
+    const providerId = provider.id ?? "";
+    const providerName = provider.name ?? providerId;
+    const models = provider.models ?? {};
+
+    for (const model of Object.values(models) as ApiModel[]) {
+      const cost = getObject(model.cost);
+      const limit = getObject(model.limit);
+      const modalities = getObject(model.modalities);
+      const inputModalities = getStringArray(modalities.input);
+      const modelId = getString(model.id);
+      const modelName = getString(model.name) || modelId;
+      const family = getString(model.family);
+      const context = getNumber(limit.context) ?? getNumber(limit.input);
+      const inputPrice = getNumber(cost.input);
+      const outputPrice = getNumber(cost.output);
+      const row: ModelRow = {
+        id: `${providerId}:${modelId}`,
+        providerId,
+        providerName,
+        modelId,
+        modelName,
+        family,
+        releaseDate: getString(model.release_date),
+        openWeights: getBoolean(model.open_weights),
+        inputModalities,
+        capabilities: {
+          reasoning: getBoolean(model.reasoning),
+          tool: getBoolean(model.tool_call),
+          structured: getBoolean(model.structured_output),
+          vision: getBoolean(model.attachment) || inputModalities.includes("image"),
+          cache: cost.cache_read !== undefined && cost.cache_read !== null,
+        },
+        context,
+        inputPrice,
+        outputPrice,
+        searchText: `${providerName} ${providerId} ${modelName} ${modelId} ${family}`.toLowerCase(),
+      };
+
+      rows.push(row);
+
+      const option = providerCounts.get(providerId) ?? {
+        id: providerId,
+        name: providerName,
+        count: 0,
+      };
+      option.count += 1;
+      providerCounts.set(providerId, option);
+    }
+  }
+
+  return {
+    rows,
+    providers: [...providerCounts.values()].sort((a, b) => a.name.localeCompare(b.name)),
+    maxContext: Math.max(1, ...rows.map((row) => row.context ?? 0)),
+  };
+}
+
+function formatContext(value: number | null) {
+  if (value === null) {
+    return "null";
+  }
+
+  if (value >= 1_000_000) {
+    return `${trimNumber(value / 1_000_000)}M`;
+  }
+
+  if (value >= 1_000) {
+    return `${Math.round(value / 1_000)}K`;
   }
 
   return String(value);
 }
 
-function flatten(
-  value: Record<string, JsonValue>,
-  prefix: string,
-  target: Record<string, string>,
-) {
-  for (const [key, child] of Object.entries(value)) {
-    if (key === "models") {
-      continue;
-    }
-
-    const path = `${prefix}.${key}`;
-    if (child && typeof child === "object" && !Array.isArray(child)) {
-      flatten(child as Record<string, JsonValue>, path, target);
-    } else {
-      target[path] = formatValue(child);
-    }
-  }
+function trimNumber(value: number) {
+  return value.toFixed(1).replace(/\.0$/, "");
 }
 
-function prepareData(payload: ApiPayload): PreparedData {
-  const columns = new Set<string>();
-  const rows: ModelRow[] = [];
-  const providers = Object.values(payload);
-
-  for (const provider of providers) {
-    const providerValues: Record<string, string> = {};
-    flatten(provider, "provider", providerValues);
-
-    const models = provider.models ?? {};
-    for (const model of Object.values(models)) {
-      const values = { ...providerValues };
-      flatten(model, "model", values);
-
-      for (const key of Object.keys(values)) {
-        columns.add(key);
-      }
-
-      const rowId = `${values["provider.id"] ?? "provider"}:${values["model.id"] ?? rows.length}`;
-      rows.push({
-        rowId,
-        values,
-        searchText: Object.values(values).join(" ").toLowerCase(),
-      });
-    }
+function formatPrice(value: number | null) {
+  if (value === null) {
+    return "null";
   }
 
-  const orderedColumns = [
-    ...primaryColumns.filter((column) => columns.has(column)),
-    ...[...columns]
-      .filter((column) => !primaryColumns.includes(column))
-      .sort((a, b) => a.localeCompare(b)),
-  ];
+  if (value === 0) {
+    return "Free";
+  }
 
+  if (value < 0.1) {
+    return `$${value.toFixed(3).replace(/0+$/, "").replace(/\.$/, "")}`;
+  }
+
+  if (value < 1) {
+    return `$${value.toFixed(2)}`;
+  }
+
+  return `$${value.toFixed(2).replace(/\.00$/, "").replace(/0$/, "")}`;
+}
+
+function compareRows(a: ModelRow, b: ModelRow, sort: SortState) {
+  const direction = sort.direction === "asc" ? 1 : -1;
+  const values: Record<SortKey, [string | number | null, string | number | null]> = {
+    provider: [a.providerName, b.providerName],
+    model: [a.modelName, b.modelName],
+    family: [a.family, b.family],
+    context: [a.context, b.context],
+    input: [a.inputPrice, b.inputPrice],
+    output: [a.outputPrice, b.outputPrice],
+    release: [a.releaseDate, b.releaseDate],
+  };
+  const [left, right] = values[sort.key];
+
+  if (left === null || left === "") {
+    return right === null || right === "" ? 0 : 1;
+  }
+
+  if (right === null || right === "") {
+    return -1;
+  }
+
+  if (typeof left === "number" && typeof right === "number") {
+    return (left - right) * direction;
+  }
+
+  return String(left).localeCompare(String(right), undefined, {
+    numeric: true,
+    sensitivity: "base",
+  }) * direction;
+}
+
+function nextSort(current: SortState, key: SortKey): SortState {
   return {
-    columns: orderedColumns,
-    rows,
-    providerCount: providers.length,
-    modelCount: rows.length,
+    key,
+    direction: current.key === key && current.direction === "desc" ? "asc" : "desc",
   };
 }
 
-function compareValues(a: string, b: string) {
-  const aNumber = Number(a);
-  const bNumber = Number(b);
-
-  if (a !== "" && b !== "" && !Number.isNaN(aNumber) && !Number.isNaN(bNumber)) {
-    return aNumber - bNumber;
-  }
-
-  return a.localeCompare(b, undefined, {
-    numeric: true,
-    sensitivity: "base",
-  });
+function countActiveFilters({
+  q,
+  selectedCapabilities,
+  selectedModalities,
+  openOnly,
+  maxPrice,
+  selectedProviders,
+}: {
+  q: string;
+  selectedCapabilities: ReadonlySet<CapabilityKey>;
+  selectedModalities: ReadonlySet<ModalityKey>;
+  openOnly: boolean;
+  maxPrice: number;
+  selectedProviders: ReadonlySet<string>;
+}) {
+  return (
+    (q.trim() ? 1 : 0) +
+    selectedCapabilities.size +
+    selectedModalities.size +
+    (openOnly ? 1 : 0) +
+    (maxPrice < MAX_PRICE ? 1 : 0) +
+    selectedProviders.size
+  );
 }
 
-function columnLabel(column: string) {
-  return column.replace(/\./g, " / ").replace(/_/g, " ");
-}
-
-function nextSort(current: SortState, key: string): SortState {
-  if (!current || current.key !== key) {
-    return { key, direction: "asc" };
+function toggleSetValue<T>(set: ReadonlySet<T>, value: T) {
+  const next = new Set(set);
+  if (next.has(value)) {
+    next.delete(value);
+  } else {
+    next.add(value);
   }
 
-  if (current.direction === "asc") {
-    return { key, direction: "desc" };
-  }
-
-  return null;
+  return next;
 }
 
-function parsePageSize(value: string): PageSize {
-  return value === "all" ? "all" : (Number(value) as Exclude<PageSize, "all">);
+function CapabilityChip({
+  glyph,
+  isOn,
+  label,
+}: {
+  glyph: string;
+  isOn: boolean;
+  label: string;
+}) {
+  return (
+    <span
+      className={`rounded-[3px] border px-1.5 py-0.5 text-[9px] leading-none ${
+        isOn
+          ? "border-[rgba(200,242,78,.3)] bg-[rgba(200,242,78,.1)] text-[var(--acid)]"
+          : "border-[var(--line)] bg-[var(--panel2)] text-[var(--ink3)] opacity-50"
+      }`}
+      title={label}
+    >
+      {glyph}
+    </span>
+  );
+}
+
+function Bar({
+  color,
+  scale,
+  value,
+}: {
+  color: string;
+  scale: "linear" | "log";
+  value: number | null;
+}) {
+  const width =
+    value === null
+      ? 0
+      : scale === "log"
+        ? Math.min(100, (Math.log10(Math.max(1, value)) / Math.log10(2_000_000)) * 100)
+        : Math.min(100, value);
+
+  return (
+    <span className="mt-1 block h-[3px] w-[64px] overflow-hidden rounded-full bg-[var(--line2)]">
+      <span
+        className="block h-full rounded-full"
+        style={{ background: color, width: `${width}%` }}
+      />
+    </span>
+  );
+}
+
+function HeaderButton({
+  activeSort,
+  align = "left",
+  children,
+  sortKey,
+  onSort,
+}: {
+  activeSort: SortState;
+  align?: "left" | "right";
+  children: React.ReactNode;
+  sortKey: SortKey;
+  onSort: (key: SortKey) => void;
+}) {
+  const active = activeSort.key === sortKey;
+
+  return (
+    <button
+      className={`w-full text-[10px] font-medium uppercase tracking-[.1em] transition-colors hover:text-[var(--acid)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--acid)] ${
+        align === "right" ? "text-right" : "text-left"
+      } ${active ? "text-[var(--acid)]" : "text-[var(--ink3)]"}`}
+      onClick={() => onSort(sortKey)}
+      type="button"
+    >
+      {children}
+      {active ? (activeSort.direction === "asc" ? "▲" : "▼") : ""}
+    </button>
+  );
+}
+
+function FacetCheckbox({
+  checked,
+  label,
+  onChange,
+}: {
+  checked: boolean;
+  label: string;
+  onChange: () => void;
+}) {
+  return (
+    <button
+      className={`group flex w-full items-center gap-3 py-1.5 text-left text-[13px] transition-colors ${
+        checked ? "text-[var(--ink)]" : "text-[var(--ink2)] hover:text-[var(--ink)]"
+      }`}
+      onClick={onChange}
+      type="button"
+    >
+      <span
+        className={`grid h-[15px] w-[15px] place-items-center rounded border text-[10px] leading-none ${
+          checked
+            ? "border-[var(--acid)] bg-[var(--acid)] text-[var(--bg)]"
+            : "border-[var(--line2)]"
+        }`}
+      >
+        {checked ? "x" : ""}
+      </span>
+      <span>{label}</span>
+    </button>
+  );
 }
 
 export function ModelsTable({
@@ -183,18 +435,20 @@ export function ModelsTable({
   const [error, setError] = useState<string | null>(initialError);
   const [isLoading, setIsLoading] = useState(false);
   const [updatedAt, setUpdatedAt] = useState<string | null>(initialFetchedAt);
-  const [search, setSearch] = useState("");
-  const [columnSearch, setColumnSearch] = useState("");
-  const [filters, setFilters] = useState<Record<string, string>>({});
-  const [hiddenColumns, setHiddenColumns] = useState<ReadonlySet<string>>(
+  const [q, setQ] = useState("");
+  const [selectedCapabilities, setSelectedCapabilities] = useState<ReadonlySet<CapabilityKey>>(
     () => new Set(),
   );
-  const [sort, setSort] = useState<SortState>({
-    key: "provider.name",
-    direction: "asc",
-  });
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState<PageSize>(250);
+  const [selectedModalities, setSelectedModalities] = useState<ReadonlySet<ModalityKey>>(
+    () => new Set(),
+  );
+  const [selectedProviders, setSelectedProviders] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+  const [openOnly, setOpenOnly] = useState(false);
+  const [maxPrice, setMaxPrice] = useState(MAX_PRICE);
+  const [sort, setSort] = useState<SortState>({ key: "release", direction: "desc" });
+  const tableScrollRef = useRef<HTMLDivElement>(null);
 
   async function loadData() {
     setIsLoading(true);
@@ -222,371 +476,410 @@ export function ModelsTable({
     }
   }
 
-  const preparedData = useMemo(() => (payload ? prepareData(payload) : null), [payload]);
-  const allColumns = useMemo(() => preparedData?.columns ?? [], [preparedData]);
-  const visibleColumns = useMemo(
-    () => allColumns.filter((column) => !hiddenColumns.has(column)),
-    [allColumns, hiddenColumns],
-  );
-  const matchingColumnOptions = useMemo(() => {
-    const normalizedSearch = columnSearch.trim().toLowerCase();
-
-    if (!normalizedSearch) {
-      return allColumns;
-    }
-
-    return allColumns.filter((column) =>
-      columnLabel(column).toLowerCase().includes(normalizedSearch),
-    );
-  }, [allColumns, columnSearch]);
+  const { rows, providers, maxContext } = useMemo(() => makeRows(payload), [payload]);
+  const activeFilterCount = countActiveFilters({
+    q,
+    selectedCapabilities,
+    selectedModalities,
+    openOnly,
+    maxPrice,
+    selectedProviders,
+  });
 
   const filteredRows = useMemo(() => {
-    if (!preparedData) {
-      return [];
-    }
+    const normalizedQ = q.trim().toLowerCase();
 
-    const normalizedSearch = search.trim().toLowerCase();
-    const activeFilters = Object.entries(filters)
-      .map(([key, value]) => [key, value.trim().toLowerCase()] as const)
-      .filter(([, value]) => value);
+    return rows
+      .filter((row) => {
+        if (normalizedQ && !row.searchText.includes(normalizedQ)) {
+          return false;
+        }
 
-    const matchingRows = preparedData.rows.filter((row) => {
-      if (normalizedSearch && !row.searchText.includes(normalizedSearch)) {
-        return false;
-      }
+        if (selectedProviders.size > 0 && !selectedProviders.has(row.providerId)) {
+          return false;
+        }
 
-      return activeFilters.every(([key, value]) =>
-        (row.values[key] ?? "").toLowerCase().includes(value),
-      );
-    });
+        for (const capability of selectedCapabilities) {
+          if (!row.capabilities[capability]) {
+            return false;
+          }
+        }
 
-    if (!sort) {
-      return matchingRows;
-    }
+        for (const modality of selectedModalities) {
+          if (!row.inputModalities.includes(modality)) {
+            return false;
+          }
+        }
 
-    return [...matchingRows].sort((a, b) => {
-      const result = compareValues(a.values[sort.key] ?? "", b.values[sort.key] ?? "");
-      return sort.direction === "asc" ? result : -result;
-    });
-  }, [filters, preparedData, search, sort]);
+        if (openOnly && !row.openWeights) {
+          return false;
+        }
 
-  const totalPages =
-    pageSize === "all" ? 1 : Math.max(1, Math.ceil(filteredRows.length / pageSize));
-  const safePage = Math.min(page, totalPages);
-  const visibleRows =
-    pageSize === "all"
-      ? filteredRows
-      : filteredRows.slice((safePage - 1) * pageSize, safePage * pageSize);
+        if (maxPrice < MAX_PRICE) {
+          return row.outputPrice !== null && row.outputPrice <= maxPrice;
+        }
 
-  function showAllColumns() {
-    setHiddenColumns(new Set());
-  }
+        return true;
+      })
+      .sort((a, b) => compareRows(a, b, sort));
+  }, [
+    maxPrice,
+    openOnly,
+    q,
+    rows,
+    selectedCapabilities,
+    selectedModalities,
+    selectedProviders,
+    sort,
+  ]);
 
-  function showPrimaryColumnsOnly() {
-    const primaryVisible = new Set(primaryColumns.filter((column) => allColumns.includes(column)));
-    const nextHiddenColumns = new Set(
-      allColumns.filter((column) => !primaryVisible.has(column)),
-    );
+  // TanStack Virtual intentionally returns function fields; this component does
+  // not pass them into memoized children.
+  // eslint-disable-next-line react-hooks/incompatible-library
+  const rowVirtualizer = useVirtualizer({
+    count: filteredRows.length,
+    getScrollElement: () => tableScrollRef.current,
+    estimateSize: () => 62,
+    overscan: 12,
+  });
 
-    setHiddenColumns(nextHiddenColumns);
-    setFilters((current) =>
-      Object.fromEntries(
-        Object.entries(current).filter(([column]) => !nextHiddenColumns.has(column)),
-      ),
-    );
-    setSort((current) =>
-      current && nextHiddenColumns.has(current.key) ? null : current,
-    );
-    setPage(1);
-  }
-
-  function toggleColumn(column: string) {
-    const isHidden = hiddenColumns.has(column);
-
-    if (!isHidden && visibleColumns.length <= 1) {
-      return;
-    }
-
-    setHiddenColumns((current) => {
-      const next = new Set(current);
-
-      if (isHidden) {
-        next.delete(column);
-      } else {
-        next.add(column);
-      }
-
-      return next;
-    });
-
-    if (!isHidden) {
-      setFilters((current) =>
-        Object.fromEntries(Object.entries(current).filter(([key]) => key !== column)),
-      );
-      setSort((current) => (current?.key === column ? null : current));
-    }
-
-    setPage(1);
+  function clearFilters() {
+    setQ("");
+    setSelectedCapabilities(new Set());
+    setSelectedModalities(new Set());
+    setSelectedProviders(new Set());
+    setOpenOnly(false);
+    setMaxPrice(MAX_PRICE);
   }
 
   return (
-    <div className="flex min-h-screen flex-col gap-5 px-4 py-5 sm:px-6 lg:px-8">
-      <header className="flex flex-col gap-4 border-b border-slate-200 pb-5 lg:flex-row lg:items-end lg:justify-between">
-        <div>
-          <p className="text-sm font-medium text-emerald-700">models.dev live data</p>
-          <h1 className="mt-1 text-3xl font-semibold tracking-normal text-slate-950">
-            Model catalog
-          </h1>
-          <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2 text-sm text-slate-600">
-            <a
-              className="font-medium text-slate-900 underline decoration-emerald-500 underline-offset-4"
-              href={SOURCE_URL}
-              rel="noreferrer"
-              target="_blank"
-            >
+    <main className="console-shell">
+      <aside className="console-rail">
+        <section className="brand-block">
+          <div className="brand-mark">◇</div>
+          <div>
+            <div className="brand-title">models.dev</div>
+            <div className="brand-subtitle">catalog explorer</div>
+          </div>
+        </section>
+
+        <label className="rail-search">
+          <span>/</span>
+          <input
+            onChange={(event) => setQ(event.target.value)}
+            placeholder="filter..."
+            type="search"
+            value={q}
+          />
+        </label>
+
+        {activeFilterCount > 0 ? (
+          <button className="clear-filters" onClick={clearFilters} type="button">
+            clear {activeFilterCount} filters
+          </button>
+        ) : null}
+
+        <FacetSection title="capabilities">
+          {capabilityOptions.map((capability) => (
+            <FacetCheckbox
+              checked={selectedCapabilities.has(capability.key)}
+              key={capability.key}
+              label={capability.label}
+              onChange={() =>
+                setSelectedCapabilities((current) => toggleSetValue(current, capability.key))
+              }
+            />
+          ))}
+        </FacetSection>
+
+        <FacetSection title="input modality">
+          {modalityOptions.map((modality) => (
+            <FacetCheckbox
+              checked={selectedModalities.has(modality.key)}
+              key={modality.key}
+              label={modality.label}
+              onChange={() =>
+                setSelectedModalities((current) => toggleSetValue(current, modality.key))
+              }
+            />
+          ))}
+        </FacetSection>
+
+        <FacetSection title="weights">
+          <FacetCheckbox
+            checked={openOnly}
+            label="open weights only"
+            onChange={() => setOpenOnly((current) => !current)}
+          />
+        </FacetSection>
+
+        <FacetSection title="max output price">
+          <input
+            aria-label="Maximum output price"
+            className="price-slider"
+            max={MAX_PRICE}
+            min={0.4}
+            onChange={(event) => setMaxPrice(Number(event.target.value))}
+            step={0.4}
+            type="range"
+            value={maxPrice}
+          />
+          <div className="price-caption">
+            ≤ <strong>${trimNumber(maxPrice)}</strong> /M
+          </div>
+        </FacetSection>
+
+        <FacetSection title="providers">
+          <div className="provider-list">
+            {providers.map((provider) => {
+              const selected = selectedProviders.has(provider.id);
+              const color = providerColor(provider.id, provider.name);
+
+              return (
+                <button
+                  className={`provider-filter ${selected ? "selected" : ""}`}
+                  key={provider.id}
+                  onClick={() =>
+                    setSelectedProviders((current) => toggleSetValue(current, provider.id))
+                  }
+                  type="button"
+                >
+                  <span className="provider-dot" style={{ background: color }} />
+                  <span className="provider-name">{provider.name}</span>
+                  <span className="provider-count">{provider.count}</span>
+                </button>
+              );
+            })}
+          </div>
+        </FacetSection>
+      </aside>
+
+      <section className="console-main">
+        <header className="topbar">
+          <div className="result-summary">
+            <strong>{filteredRows.length}</strong>
+            <span>models</span>
+            <span>/</span>
+            <span>{rows.length}</span>
+            <span>·</span>
+            <span>{activeFilterCount} active filters</span>
+          </div>
+
+          <div className="topbar-actions">
+            <a href={SOURCE_URL} rel="noreferrer" target="_blank">
               Source JSON
             </a>
-            {preparedData ? <span>{preparedData.providerCount} providers</span> : null}
-            {preparedData ? <span>{preparedData.modelCount} models</span> : null}
-            {preparedData ? (
-              <span>
-                {visibleColumns.length} of {preparedData.columns.length} columns shown
-              </span>
-            ) : null}
-            {updatedAt ? <span>Fetched {updatedAt}</span> : null}
+            <button disabled={isLoading} onClick={loadData} type="button">
+              {isLoading ? "Refreshing" : "Refresh"}
+            </button>
+            <SortPill activeSort={sort} label="date" sortKey="release" onSort={setSort} />
+            <SortPill activeSort={sort} label="price" sortKey="output" onSort={setSort} />
+            <SortPill activeSort={sort} label="context" sortKey="context" onSort={setSort} />
           </div>
-        </div>
+        </header>
 
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-          <input
-            className="h-10 w-full min-w-0 rounded-md border border-slate-300 bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100 sm:w-80"
-            onChange={(event) => {
-              setSearch(event.target.value);
-              setPage(1);
-            }}
-            placeholder="Search all fields"
-            type="search"
-            value={search}
-          />
-          <button
-            className="h-10 rounded-md border border-slate-300 bg-white px-4 text-sm font-medium text-slate-950 transition hover:border-slate-400 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
-            disabled={isLoading}
-            onClick={loadData}
-            type="button"
+        {error ? <div className="console-error">{error}</div> : null}
+
+        <div className="table-header">
+          <HeaderButton activeSort={sort} sortKey="provider" onSort={(key) => setSort(nextSort(sort, key))}>
+            provider
+          </HeaderButton>
+          <HeaderButton activeSort={sort} sortKey="model" onSort={(key) => setSort(nextSort(sort, key))}>
+            model
+          </HeaderButton>
+          <HeaderButton activeSort={sort} sortKey="family" onSort={(key) => setSort(nextSort(sort, key))}>
+            family
+          </HeaderButton>
+          <div className="caps-header">caps</div>
+          <HeaderButton
+            activeSort={sort}
+            align="right"
+            sortKey="context"
+            onSort={(key) => setSort(nextSort(sort, key))}
           >
-            {isLoading ? "Loading" : "Refresh"}
-          </button>
+            context
+          </HeaderButton>
+          <HeaderButton
+            activeSort={sort}
+            align="right"
+            sortKey="input"
+            onSort={(key) => setSort(nextSort(sort, key))}
+          >
+            in $/m
+          </HeaderButton>
+          <HeaderButton
+            activeSort={sort}
+            align="right"
+            sortKey="output"
+            onSort={(key) => setSort(nextSort(sort, key))}
+          >
+            out $/m
+          </HeaderButton>
+          <HeaderButton
+            activeSort={sort}
+            align="right"
+            sortKey="release"
+            onSort={(key) => setSort(nextSort(sort, key))}
+          >
+            released
+          </HeaderButton>
         </div>
-      </header>
 
-      {error ? (
-        <section className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
-          {error}
-        </section>
-      ) : null}
-
-      {preparedData ? (
-        <details className="rounded-md border border-slate-200 bg-white shadow-sm">
-          <summary className="flex cursor-pointer select-none items-center justify-between gap-3 px-4 py-3 text-sm font-semibold text-slate-950 marker:text-slate-500">
-            <span>Columns</span>
-            <span className="text-xs font-medium text-slate-600">
-              {visibleColumns.length} shown / {preparedData.columns.length} total
-            </span>
-          </summary>
-          <div className="border-t border-slate-200 p-4">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <input
-                className="h-9 w-full rounded-md border border-slate-300 bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100 sm:max-w-sm"
-                onChange={(event) => setColumnSearch(event.target.value)}
-                placeholder="Find columns"
-                type="search"
-                value={columnSearch}
-              />
-              <div className="flex flex-wrap gap-2">
-                <button
-                  className="h-9 rounded-md border border-slate-300 bg-white px-3 text-sm font-medium text-slate-950 transition hover:border-slate-400 hover:bg-slate-100"
-                  onClick={showAllColumns}
-                  type="button"
-                >
-                  Show all
-                </button>
-                <button
-                  className="h-9 rounded-md border border-slate-300 bg-white px-3 text-sm font-medium text-slate-950 transition hover:border-slate-400 hover:bg-slate-100"
-                  onClick={showPrimaryColumnsOnly}
-                  type="button"
-                >
-                  Primary only
-                </button>
-              </div>
-            </div>
-            <div className="mt-4 grid max-h-56 grid-cols-1 gap-2 overflow-auto pr-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-              {matchingColumnOptions.map((column) => {
-                const isVisible = !hiddenColumns.has(column);
-                const isLastVisible = isVisible && visibleColumns.length <= 1;
-
+        <div className="table-scroll" ref={tableScrollRef}>
+          {filteredRows.length === 0 ? (
+            <div className="empty-state">{"// no models match the active query"}</div>
+          ) : (
+            <div
+              className="virtual-space"
+              style={{ height: `${rowVirtualizer.getTotalSize()}px` }}
+            >
+              {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+                const row = filteredRows[virtualRow.index];
                 return (
-                  <label
-                    className="flex min-h-10 items-start gap-2 rounded-md border border-slate-200 px-3 py-2 text-sm text-slate-800"
-                    key={column}
-                  >
-                    <input
-                      checked={isVisible}
-                      className="mt-0.5 h-4 w-4 accent-emerald-700"
-                      disabled={isLastVisible}
-                      onChange={() => toggleColumn(column)}
-                      type="checkbox"
-                    />
-                    <span className="break-words capitalize">{columnLabel(column)}</span>
-                  </label>
+                  <ModelResultRow
+                    key={row.id}
+                    maxContext={maxContext}
+                    row={row}
+                    start={virtualRow.start}
+                  />
                 );
               })}
             </div>
-          </div>
-        </details>
-      ) : null}
-
-      <section className="flex flex-wrap items-center justify-between gap-3 text-sm text-slate-700">
-        <div>
-          {preparedData ? (
-            <span>
-              Showing {visibleRows.length} of {filteredRows.length} matching rows
-            </span>
-          ) : (
-            <span>Loading rows</span>
           )}
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <label className="font-medium" htmlFor="page-size">
-            Rows
-          </label>
-          <select
-            className="h-9 rounded-md border border-slate-300 bg-white px-2 text-sm text-slate-950"
-            id="page-size"
-            onChange={(event) => {
-              setPageSize(parsePageSize(event.target.value));
-              setPage(1);
-            }}
-            value={String(pageSize)}
-          >
-            {pageSizeOptions.map((option) => (
-              <option key={option} value={option}>
-                {option === "all" ? "All" : option}
-              </option>
-            ))}
-          </select>
-          <button
-            className="h-9 rounded-md border border-slate-300 bg-white px-3 text-sm font-medium text-slate-950 disabled:cursor-not-allowed disabled:opacity-50"
-            disabled={safePage <= 1 || pageSize === "all"}
-            onClick={() => setPage((current) => Math.max(1, current - 1))}
-            type="button"
-          >
-            Previous
-          </button>
-          <span className="min-w-20 text-center">
-            {safePage} / {totalPages}
+        <footer className="status-bar">
+          <span className="ready">READY</span>
+          <span>rows {filteredRows.length}</span>
+          <span>
+            sort {sort.key} {sort.direction}
           </span>
-          <button
-            className="h-9 rounded-md border border-slate-300 bg-white px-3 text-sm font-medium text-slate-950 disabled:cursor-not-allowed disabled:opacity-50"
-            disabled={safePage >= totalPages || pageSize === "all"}
-            onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
-            type="button"
-          >
-            Next
-          </button>
-        </div>
+          <span className="updated">{updatedAt ? `fetched ${updatedAt}` : ""}</span>
+          <span className="hint">click headers to sort · facets stack</span>
+        </footer>
       </section>
+    </main>
+  );
+}
 
-      <section className="min-h-0 flex-1 overflow-hidden rounded-md border border-slate-200 bg-white shadow-sm">
-        <div className="max-h-[calc(100vh-260px)] overflow-auto">
-          <table className="min-w-full border-separate border-spacing-0 text-left text-sm">
-            <thead className="sticky top-0 z-10 bg-slate-100 text-slate-900 shadow-sm">
-              <tr>
-                {visibleColumns.map((column) => {
-                  const sortMarker =
-                    sort?.key === column ? (sort.direction === "asc" ? "Asc" : "Desc") : "";
+function FacetSection({
+  children,
+  title,
+}: {
+  children: React.ReactNode;
+  title: string;
+}) {
+  return (
+    <section className="facet-section">
+      <h2>{title}</h2>
+      {children}
+    </section>
+  );
+}
 
-                  return (
-                    <th
-                      className="w-56 min-w-56 border-b border-r border-slate-200 p-0 align-top last:border-r-0"
-                      key={column}
-                      scope="col"
-                    >
-                      <button
-                        className="flex min-h-12 w-full items-start justify-between gap-2 px-3 py-2 text-left font-semibold capitalize text-slate-950 transition hover:bg-slate-200"
-                        onClick={() => {
-                          setSort((current) => nextSort(current, column));
-                          setPage(1);
-                        }}
-                        type="button"
-                      >
-                        <span>{columnLabel(column)}</span>
-                        <span className="shrink-0 text-xs font-medium text-emerald-700">
-                          {sortMarker}
-                        </span>
-                      </button>
-                    </th>
-                  );
-                })}
-              </tr>
-              <tr>
-                {visibleColumns.map((column) => (
-                  <th
-                    className="w-56 min-w-56 border-b border-r border-slate-200 bg-white p-2 last:border-r-0"
-                    key={`${column}-filter`}
-                    scope="col"
-                  >
-                    <input
-                      aria-label={`Filter ${columnLabel(column)}`}
-                      className="h-8 w-full rounded-md border border-slate-300 px-2 text-xs font-normal text-slate-950 outline-none transition focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100"
-                      onChange={(event) => {
-                        setFilters((current) => ({
-                          ...current,
-                          [column]: event.target.value,
-                        }));
-                        setPage(1);
-                      }}
-                      placeholder="Filter"
-                      value={filters[column] ?? ""}
-                    />
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {isLoading && !preparedData ? (
-                <tr>
-                  <td className="p-6 text-slate-600">Loading</td>
-                </tr>
-              ) : null}
-              {!isLoading && preparedData && visibleRows.length === 0 ? (
-                <tr>
-                  <td className="p-6 text-slate-600" colSpan={visibleColumns.length || 1}>
-                    No rows
-                  </td>
-                </tr>
-              ) : null}
-              {preparedData
-                ? visibleRows.map((row) => (
-                    <tr className="odd:bg-white even:bg-slate-50" key={row.rowId}>
-                      {visibleColumns.map((column) => (
-                        <td
-                          className="max-w-56 border-b border-r border-slate-200 px-3 py-2 align-top text-slate-800 last:border-r-0"
-                          key={`${row.rowId}-${column}`}
-                          title={row.values[column] ?? ""}
-                        >
-                          <span className="line-clamp-3 break-words">
-                            {row.values[column] ?? ""}
-                          </span>
-                        </td>
-                      ))}
-                    </tr>
-                  ))
-                : null}
-            </tbody>
-          </table>
-        </div>
-      </section>
+function SortPill({
+  activeSort,
+  label,
+  sortKey,
+  onSort,
+}: {
+  activeSort: SortState;
+  label: string;
+  sortKey: SortKey;
+  onSort: (sort: SortState) => void;
+}) {
+  const active = activeSort.key === sortKey;
+
+  return (
+    <button
+      className={`sort-pill ${active ? "active" : ""}`}
+      onClick={() => onSort(nextSort(activeSort, sortKey))}
+      type="button"
+    >
+      {label}
+      {active ? (activeSort.direction === "asc" ? " ▲" : " ▼") : ""}
+    </button>
+  );
+}
+
+function ModelResultRow({
+  maxContext,
+  row,
+  start,
+}: {
+  maxContext: number;
+  row: ModelRow;
+  start: number;
+}) {
+  const color = providerColor(row.providerId, row.providerName);
+  const contextWidth =
+    row.context === null
+      ? 0
+      : (Math.log10(Math.max(1, row.context)) / Math.log10(Math.max(1, maxContext))) * 100;
+  const inputWidth =
+    row.inputPrice === null ? 0 : Math.min(100, (row.inputPrice / INPUT_PRICE_SCALE) * 100);
+  const outputWidth =
+    row.outputPrice === null ? 0 : Math.min(100, (row.outputPrice / OUTPUT_PRICE_SCALE) * 100);
+
+  return (
+    <div className="result-row" style={{ transform: `translateY(${start}px)` }}>
+      <div className="provider-cell">
+        <span className="provider-dot" style={{ background: color }} />
+        <span>{row.providerName}</span>
+      </div>
+      <div className="model-cell">
+        <span>{row.modelName}</span>
+        {row.openWeights ? <span className="oss-badge">OSS</span> : null}
+      </div>
+      <div className="family-cell">{row.family || "—"}</div>
+      <div className="cap-cell">
+        {capabilityOptions.map((capability) => (
+          <CapabilityChip
+            glyph={capability.glyph}
+            isOn={row.capabilities[capability.key]}
+            key={capability.key}
+            label={capability.label}
+          />
+        ))}
+      </div>
+      <MetricCell
+        barColor="var(--cyan)"
+        barWidth={contextWidth}
+        className="context-value"
+        value={formatContext(row.context)}
+      />
+      <MetricCell
+        barColor="var(--blue)"
+        barWidth={inputWidth}
+        value={formatPrice(row.inputPrice)}
+      />
+      <MetricCell
+        barColor="var(--acid-d)"
+        barWidth={outputWidth}
+        value={formatPrice(row.outputPrice)}
+      />
+      <div className="date-cell">{row.releaseDate || "null"}</div>
+    </div>
+  );
+}
+
+function MetricCell({
+  barColor,
+  barWidth,
+  className,
+  value,
+}: {
+  barColor: string;
+  barWidth: number;
+  className?: string;
+  value: string;
+}) {
+  const isNull = value === "null";
+
+  return (
+    <div className={`metric-cell ${className ?? ""} ${isNull ? "nullish" : ""}`}>
+      <span>{value}</span>
+      <Bar color={barColor} scale="linear" value={barWidth} />
     </div>
   );
 }
