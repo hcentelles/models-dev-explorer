@@ -41,7 +41,8 @@ body {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
@@ -86,6 +87,10 @@ button:disabled {
   padding: 20px 18px;
 }
 
+.brand-block > div:nth-child(2) {
+  min-width: 0;
+}
+
 .brand-mark {
   background: var(--acid);
   border-radius: 7px;
@@ -124,6 +129,44 @@ button:disabled {
   font-size: 10px;
   letter-spacing: 0.12em;
   margin-top: 3px;
+}
+
+.sidebar-toggle,
+.sidebar-reopen {
+  align-items: center;
+  background: transparent;
+  border: 1px solid var(--line2);
+  border-radius: 6px;
+  color: var(--ink2);
+  display: flex;
+  height: 30px;
+  justify-content: center;
+  line-height: 1;
+  width: 30px;
+}
+
+.sidebar-toggle {
+  margin-left: auto;
+}
+
+.sidebar-reopen {
+  flex: 0 0 42px;
+  height: 42px;
+  margin: 16px 0 0 14px;
+  width: 42px;
+  z-index: 5;
+}
+
+.sidebar-toggle:hover,
+.sidebar-reopen:hover {
+  border-color: var(--acid-d);
+  color: var(--acid);
+}
+
+.sidebar-toggle span,
+.sidebar-reopen span {
+  font-size: 22px;
+  transform: translateY(-1px);
 }
 
 .rail-search {
@@ -186,22 +229,6 @@ button:disabled {
   text-transform: uppercase;
 }
 
-.price-slider {
-  accent-color: var(--acid);
-  width: 100%;
-}
-
-.price-caption {
-  color: var(--ink2);
-  font-family: var(--mono);
-  font-size: 11px;
-  margin-top: 8px;
-}
-
-.price-caption strong {
-  color: var(--acid);
-}
-
 .provider-list {
   max-height: 172px;
   overflow-y: auto;
@@ -261,7 +288,7 @@ button:disabled {
 }
 
 .rail-hidden .console-main {
-  width: 100vw;
+  width: auto;
 }
 
 .topbar {
@@ -299,8 +326,7 @@ button:disabled {
 
 .topbar-actions a,
 .topbar-actions > button,
-.column-picker summary,
-.sort-pill {
+.column-picker summary {
   background: transparent;
   border: 1px solid var(--line2);
   border-radius: 6px;
@@ -416,12 +442,6 @@ button:disabled {
   margin-top: 2px;
 }
 
-.sort-pill.active {
-  background: rgba(200, 242, 78, 0.12);
-  border-color: var(--acid-d);
-  color: var(--acid);
-}
-
 .console-error {
   border-bottom: 1px solid #5f2929;
   color: #ff9d9d;
@@ -504,6 +524,10 @@ button:disabled {
   padding-right: 8px;
 }
 
+.column-filter-control.cost {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .table-filter-row input,
 .column-filter-select {
   background: var(--bg);
@@ -521,6 +545,10 @@ button:disabled {
 
 .column-filter-select.boolean {
   margin-right: 8px;
+}
+
+.column-filter-select.free {
+  height: 26px;
 }
 
 .table-filter-row input:focus,
@@ -579,7 +607,8 @@ button:disabled {
 }
 
 .mini-filter,
-.range-filter {
+.range-filter,
+.mini-range-filter {
   color: var(--ink2);
   display: flex;
   flex-direction: column;
@@ -612,6 +641,42 @@ button:disabled {
 
 .range-filter strong {
   color: var(--acid);
+}
+
+.mini-range-inputs {
+  display: grid;
+  gap: 6px;
+  grid-template-columns: 1fr 1fr;
+}
+
+.mini-range-inputs label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.mini-range-inputs span,
+.mini-range-suffix {
+  color: var(--ink3);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.mini-range-inputs input {
+  background: var(--bg);
+  border: 1px solid var(--line2);
+  border-radius: 6px;
+  color: var(--ink);
+  height: 30px;
+  min-width: 0;
+  outline: 0;
+  padding: 0 8px;
+  width: 100%;
+}
+
+.mini-range-inputs input:focus {
+  border-color: var(--acid-d);
 }
 
 .family-dot {

@@ -4,8 +4,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 
 const SOURCE_URL = "https://models.dev/api.json";
-const MAX_PRICE = 120;
-const MAX_INPUT_PRICE = 15;
 const DEFAULT_MIN_CONTEXT = 0;
 const INPUT_PRICE_SCALE = 15;
 const OUTPUT_PRICE_SCALE = 120;
@@ -29,6 +27,7 @@ type SortState = {
 type ColumnKind = "boolean" | "number" | "text";
 type EmptyFilterMode = "any" | "filled" | "empty";
 type BooleanFilterMode = "any" | "true" | "false" | "empty";
+type CostFreeMode = "include" | "exclude" | "only";
 type CapabilityKey = "reasoning" | "tool" | "structured" | "vision" | "cache";
 type ModalityKey = "text" | "image" | "audio";
 type ColumnGroup =
@@ -102,14 +101,19 @@ type PersistedFilterState = {
   selectedStatuses?: string[];
   openOnly?: boolean;
   maxPrice?: number;
+  minInputPrice?: number;
   maxInputPrice?: number;
+  minOutputPrice?: number;
+  maxOutputPrice?: number;
   minContext?: number;
+  maxContext?: number;
   releaseAfter?: string;
   releaseBefore?: string;
   providerApiFilter?: string;
   sort?: SortState;
   visibleColumnKeys?: string[];
   sidebarOpen?: boolean;
+  costFreeFilters?: Record<string, CostFreeMode>;
 };
 
 const defaultColumnKeys = [
@@ -546,6 +550,19 @@ function formatPrice(value: number | null) {
   return `$${value.toFixed(2).replace(/\.00$/, "").replace(/0$/, "")}`;
 }
 
+function formatNumberInputValue(value: number | null) {
+  return value === null ? "" : String(value);
+}
+
+function parseNumberInputValue(value: string) {
+  if (!value.trim()) {
+    return null;
+  }
+
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 function compareRows(a: ModelRow, b: ModelRow, sort: SortState) {
   const direction = sort.direction === "asc" ? 1 : -1;
   const left = a.rawValues[sort.key] ?? a.values[sort.key] ?? "";
@@ -588,9 +605,12 @@ function countActiveFilters({
   selectedFamilies,
   selectedStatuses,
   openOnly,
-  maxPrice,
+  minInputPrice,
   maxInputPrice,
+  minOutputPrice,
+  maxOutputPrice,
   minContext,
+  maxContextLimit,
   releaseAfter,
   releaseBefore,
   providerApiFilter,
@@ -598,6 +618,7 @@ function countActiveFilters({
   columnFilters,
   columnEmptyFilters,
   columnBooleanFilters,
+  costFreeFilters,
 }: {
   q: string;
   selectedCapabilities: ReadonlySet<CapabilityKey>;
@@ -606,9 +627,12 @@ function countActiveFilters({
   selectedFamilies: ReadonlySet<string>;
   selectedStatuses: ReadonlySet<string>;
   openOnly: boolean;
-  maxPrice: number;
-  maxInputPrice: number;
-  minContext: number;
+  minInputPrice: number | null;
+  maxInputPrice: number | null;
+  minOutputPrice: number | null;
+  maxOutputPrice: number | null;
+  minContext: number | null;
+  maxContextLimit: number | null;
   releaseAfter: string;
   releaseBefore: string;
   providerApiFilter: string;
@@ -616,6 +640,7 @@ function countActiveFilters({
   columnFilters: Record<string, string>;
   columnEmptyFilters: Record<string, EmptyFilterMode>;
   columnBooleanFilters: Record<string, BooleanFilterMode>;
+  costFreeFilters: Record<string, CostFreeMode>;
 }) {
   return (
     (q.trim() ? 1 : 0) +
@@ -625,16 +650,20 @@ function countActiveFilters({
     selectedFamilies.size +
     selectedStatuses.size +
     (openOnly ? 1 : 0) +
-    (maxPrice < MAX_PRICE ? 1 : 0) +
-    (maxInputPrice < MAX_INPUT_PRICE ? 1 : 0) +
-    (minContext > DEFAULT_MIN_CONTEXT ? 1 : 0) +
+    (minInputPrice !== null ? 1 : 0) +
+    (maxInputPrice !== null ? 1 : 0) +
+    (minOutputPrice !== null ? 1 : 0) +
+    (maxOutputPrice !== null ? 1 : 0) +
+    (minContext !== null && minContext > DEFAULT_MIN_CONTEXT ? 1 : 0) +
+    (maxContextLimit !== null ? 1 : 0) +
     (releaseAfter ? 1 : 0) +
     (releaseBefore ? 1 : 0) +
     (providerApiFilter.trim() ? 1 : 0) +
     selectedProviders.size +
     Object.values(columnFilters).filter((value) => value.trim()).length +
     Object.values(columnEmptyFilters).filter((value) => value !== "any").length +
-    Object.values(columnBooleanFilters).filter((value) => value !== "any").length
+    Object.values(columnBooleanFilters).filter((value) => value !== "any").length +
+    Object.values(costFreeFilters).filter((value) => value !== "include").length
   );
 }
 
@@ -690,15 +719,15 @@ function compactFilterState(state: PersistedFilterState): PersistedFilterState {
         ? state.selectedStatuses
         : undefined,
     openOnly: state.openOnly || undefined,
-    maxPrice: state.maxPrice !== undefined && state.maxPrice < MAX_PRICE ? state.maxPrice : undefined,
-    maxInputPrice:
-      state.maxInputPrice !== undefined && state.maxInputPrice < MAX_INPUT_PRICE
-        ? state.maxInputPrice
-        : undefined,
+    minInputPrice: state.minInputPrice ?? undefined,
+    maxInputPrice: state.maxInputPrice ?? undefined,
+    minOutputPrice: state.minOutputPrice ?? undefined,
+    maxOutputPrice: state.maxOutputPrice ?? undefined,
     minContext:
       state.minContext !== undefined && state.minContext > DEFAULT_MIN_CONTEXT
         ? state.minContext
         : undefined,
+    maxContext: state.maxContext ?? undefined,
     releaseAfter: state.releaseAfter || undefined,
     releaseBefore: state.releaseBefore || undefined,
     providerApiFilter: state.providerApiFilter?.trim() || undefined,
@@ -713,6 +742,7 @@ function compactFilterState(state: PersistedFilterState): PersistedFilterState {
         ? state.visibleColumnKeys
         : undefined,
     sidebarOpen: state.sidebarOpen === false ? false : undefined,
+    costFreeFilters: cleanRecord(state.costFreeFilters, "include"),
   };
 }
 
@@ -820,31 +850,6 @@ function FacetSection({ children, title }: { children: React.ReactNode; title: s
   );
 }
 
-function SortPill({
-  activeSort,
-  label,
-  sortKey,
-  onSort,
-}: {
-  activeSort: SortState;
-  label: string;
-  sortKey: string;
-  onSort: (sort: SortState) => void;
-}) {
-  const active = activeSort.key === sortKey;
-
-  return (
-    <button
-      className={`sort-pill ${active ? "active" : ""}`}
-      onClick={() => onSort(nextSort(activeSort, sortKey))}
-      type="button"
-    >
-      {label}
-      {active ? (activeSort.direction === "asc" ? " ▲" : " ▼") : ""}
-    </button>
-  );
-}
-
 function MiniTextFilter({
   label,
   onChange,
@@ -866,6 +871,59 @@ function MiniTextFilter({
         value={value}
       />
     </label>
+  );
+}
+
+function MiniNumberRangeFilter({
+  label,
+  max,
+  maxValue,
+  minValue,
+  onMaxChange,
+  onMinChange,
+  step,
+  suffix,
+}: {
+  label: string;
+  maxValue: number | null;
+  minValue: number | null;
+  max?: number;
+  onMaxChange: (value: number | null) => void;
+  onMinChange: (value: number | null) => void;
+  step?: number;
+  suffix?: string;
+}) {
+  return (
+    <div className="mini-range-filter">
+      <div>{label}</div>
+      <div className="mini-range-inputs">
+        <label>
+          <span>min</span>
+          <input
+            min={0}
+            max={max}
+            onChange={(event) => onMinChange(parseNumberInputValue(event.target.value))}
+            placeholder="any"
+            step={step}
+            type="number"
+            value={formatNumberInputValue(minValue)}
+          />
+        </label>
+        <label>
+          <span>max</span>
+          <input
+            min={0}
+            max={max}
+            onChange={(event) => onMaxChange(parseNumberInputValue(event.target.value))}
+            placeholder="any"
+            step={step}
+            type="number"
+            value={formatNumberInputValue(maxValue)}
+          />
+        </label>
+      </div>
+      {suffix ? <div className="mini-range-suffix">{suffix}</div> : null}
+    </div>
   );
 }
 
@@ -951,17 +1009,21 @@ function ColumnPicker({
 function ColumnFilterControl({
   column,
   booleanMode,
+  costFreeMode,
   emptyMode,
   textValue,
   onBooleanModeChange,
+  onCostFreeModeChange,
   onEmptyModeChange,
   onTextChange,
 }: {
   column: ColumnDef;
   booleanMode: BooleanFilterMode;
+  costFreeMode: CostFreeMode;
   emptyMode: EmptyFilterMode;
   textValue: string;
   onBooleanModeChange: (value: BooleanFilterMode) => void;
+  onCostFreeModeChange: (value: CostFreeMode) => void;
   onEmptyModeChange: (value: EmptyFilterMode) => void;
   onTextChange: (value: string) => void;
 }) {
@@ -982,7 +1044,7 @@ function ColumnFilterControl({
   }
 
   return (
-    <div className="column-filter-control">
+    <div className={`column-filter-control ${column.key.includes(".cost.") ? "cost" : ""}`}>
       <input
         aria-label={`Filter ${column.label}`}
         onChange={(event) => onTextChange(event.target.value)}
@@ -1000,6 +1062,18 @@ function ColumnFilterControl({
         <option value="filled">filled</option>
         <option value="empty">empty</option>
       </select>
+      {column.key.includes(".cost.") ? (
+        <select
+          aria-label={`Free filter ${column.label}`}
+          className="column-filter-select free"
+          onChange={(event) => onCostFreeModeChange(event.target.value as CostFreeMode)}
+          value={costFreeMode}
+        >
+          <option value="include">include free</option>
+          <option value="exclude">exclude free</option>
+          <option value="only">only free</option>
+        </select>
+      ) : null}
     </div>
   );
 }
@@ -1175,6 +1249,7 @@ export function ModelsTable({
   const [columnBooleanFilters, setColumnBooleanFilters] = useState<
     Record<string, BooleanFilterMode>
   >({});
+  const [costFreeFilters, setCostFreeFilters] = useState<Record<string, CostFreeMode>>({});
   const [visibleColumnKeys, setVisibleColumnKeys] = useState<ReadonlySet<string>>(
     () => new Set(defaultColumnKeys),
   );
@@ -1197,9 +1272,12 @@ export function ModelsTable({
     () => new Set(),
   );
   const [openOnly, setOpenOnly] = useState(false);
-  const [maxPrice, setMaxPrice] = useState(MAX_PRICE);
-  const [maxInputPrice, setMaxInputPrice] = useState(MAX_INPUT_PRICE);
-  const [minContext, setMinContext] = useState(DEFAULT_MIN_CONTEXT);
+  const [minContext, setMinContext] = useState<number | null>(null);
+  const [maxContextLimit, setMaxContextLimit] = useState<number | null>(null);
+  const [minInputPrice, setMinInputPrice] = useState<number | null>(null);
+  const [maxInputPrice, setMaxInputPrice] = useState<number | null>(null);
+  const [minOutputPrice, setMinOutputPrice] = useState<number | null>(null);
+  const [maxOutputPrice, setMaxOutputPrice] = useState<number | null>(null);
   const [releaseAfter, setReleaseAfter] = useState("");
   const [releaseBefore, setReleaseBefore] = useState("");
   const [providerApiFilter, setProviderApiFilter] = useState("");
@@ -1213,6 +1291,7 @@ export function ModelsTable({
       columnFilters,
       columnEmptyFilters,
       columnBooleanFilters,
+      costFreeFilters,
       selectedCapabilities: [...selectedCapabilities],
       selectedInputModalities: [...selectedInputModalities],
       selectedOutputModalities: [...selectedOutputModalities],
@@ -1220,9 +1299,12 @@ export function ModelsTable({
       selectedFamilies: [...selectedFamilies],
       selectedStatuses: [...selectedStatuses],
       openOnly,
-      maxPrice,
-      maxInputPrice,
-      minContext,
+      minInputPrice: minInputPrice ?? undefined,
+      maxInputPrice: maxInputPrice ?? undefined,
+      minOutputPrice: minOutputPrice ?? undefined,
+      maxOutputPrice: maxOutputPrice ?? undefined,
+      minContext: minContext ?? undefined,
+      maxContext: maxContextLimit ?? undefined,
       releaseAfter,
       releaseBefore,
       providerApiFilter,
@@ -1234,9 +1316,13 @@ export function ModelsTable({
     columnBooleanFilters,
     columnEmptyFilters,
     columnFilters,
+    costFreeFilters,
+    maxContextLimit,
     maxInputPrice,
-    maxPrice,
+    maxOutputPrice,
+    minInputPrice,
     minContext,
+    minOutputPrice,
     openOnly,
     providerApiFilter,
     q,
@@ -1262,6 +1348,7 @@ export function ModelsTable({
     setColumnFilters(state.columnFilters ?? {});
     setColumnEmptyFilters(state.columnEmptyFilters ?? {});
     setColumnBooleanFilters(state.columnBooleanFilters ?? {});
+    setCostFreeFilters(state.costFreeFilters ?? {});
     setSelectedCapabilities(new Set(state.selectedCapabilities ?? []));
     setSelectedInputModalities(new Set(state.selectedInputModalities ?? []));
     setSelectedOutputModalities(new Set(state.selectedOutputModalities ?? []));
@@ -1269,13 +1356,18 @@ export function ModelsTable({
     setSelectedFamilies(new Set(state.selectedFamilies ?? []));
     setSelectedStatuses(new Set(state.selectedStatuses ?? []));
     setOpenOnly(Boolean(state.openOnly));
-    setMaxPrice(typeof state.maxPrice === "number" ? state.maxPrice : MAX_PRICE);
-    setMaxInputPrice(
-      typeof state.maxInputPrice === "number" ? state.maxInputPrice : MAX_INPUT_PRICE,
+    setMinInputPrice(typeof state.minInputPrice === "number" ? state.minInputPrice : null);
+    setMaxInputPrice(typeof state.maxInputPrice === "number" ? state.maxInputPrice : null);
+    setMinOutputPrice(typeof state.minOutputPrice === "number" ? state.minOutputPrice : null);
+    setMaxOutputPrice(
+      typeof state.maxOutputPrice === "number"
+        ? state.maxOutputPrice
+        : typeof state.maxPrice === "number"
+          ? state.maxPrice
+          : null,
     );
-    setMinContext(
-      typeof state.minContext === "number" ? state.minContext : DEFAULT_MIN_CONTEXT,
-    );
+    setMinContext(typeof state.minContext === "number" ? state.minContext : null);
+    setMaxContextLimit(typeof state.maxContext === "number" ? state.maxContext : null);
     setReleaseAfter(state.releaseAfter ?? "");
     setReleaseBefore(state.releaseBefore ?? "");
     setProviderApiFilter(state.providerApiFilter ?? "");
@@ -1381,9 +1473,12 @@ export function ModelsTable({
     selectedFamilies,
     selectedStatuses,
     openOnly,
-    maxPrice,
+    minInputPrice,
     maxInputPrice,
+    minOutputPrice,
+    maxOutputPrice,
     minContext,
+    maxContextLimit,
     releaseAfter,
     releaseBefore,
     providerApiFilter,
@@ -1391,6 +1486,7 @@ export function ModelsTable({
     columnFilters,
     columnEmptyFilters,
     columnBooleanFilters,
+    costFreeFilters,
   });
 
   const filteredRows = useMemo(() => {
@@ -1404,6 +1500,9 @@ export function ModelsTable({
     );
     const activeBooleanFilters = Object.entries(columnBooleanFilters).filter(
       ([, value]) => value !== "any",
+    );
+    const activeCostFreeFilters = Object.entries(costFreeFilters).filter(
+      ([, value]) => value !== "include",
     );
 
     return rows
@@ -1425,16 +1524,22 @@ export function ModelsTable({
           if (!row.outputModalities.includes(modality)) return false;
         }
         if (openOnly && !row.openWeights) return false;
-        if (maxPrice < MAX_PRICE && (row.outputPrice === null || row.outputPrice > maxPrice)) {
+        if (minOutputPrice !== null && (row.outputPrice === null || row.outputPrice < minOutputPrice)) {
           return false;
         }
-        if (
-          maxInputPrice < MAX_INPUT_PRICE &&
-          (row.inputPrice === null || row.inputPrice > maxInputPrice)
-        ) {
+        if (maxOutputPrice !== null && (row.outputPrice === null || row.outputPrice > maxOutputPrice)) {
           return false;
         }
-        if (minContext > DEFAULT_MIN_CONTEXT && (row.context === null || row.context < minContext)) {
+        if (minInputPrice !== null && (row.inputPrice === null || row.inputPrice < minInputPrice)) {
+          return false;
+        }
+        if (maxInputPrice !== null && (row.inputPrice === null || row.inputPrice > maxInputPrice)) {
+          return false;
+        }
+        if (minContext !== null && (row.context === null || row.context < minContext)) {
+          return false;
+        }
+        if (maxContextLimit !== null && (row.context === null || row.context > maxContextLimit)) {
           return false;
         }
         if (releaseAfter && (!row.releaseDate || row.releaseDate < releaseAfter)) return false;
@@ -1454,11 +1559,20 @@ export function ModelsTable({
         ) {
           return false;
         }
-        return activeBooleanFilters.every(([key, value]) => {
-          if (value === "empty") {
-            return cellIsEmpty(row, key);
-          }
-          return row.rawValues[key] === (value === "true");
+        if (
+          !activeBooleanFilters.every(([key, value]) => {
+            if (value === "empty") {
+              return cellIsEmpty(row, key);
+            }
+            return row.rawValues[key] === (value === "true");
+          })
+        ) {
+          return false;
+        }
+        return activeCostFreeFilters.every(([key, value]) => {
+          const rawValue = row.rawValues[key];
+          const isFree = typeof rawValue === "number" && rawValue === 0;
+          return value === "only" ? isFree : !isFree;
         });
       })
       .sort((a, b) => compareRows(a, b, sort));
@@ -1466,9 +1580,13 @@ export function ModelsTable({
     columnBooleanFilters,
     columnEmptyFilters,
     columnFilters,
+    costFreeFilters,
+    maxContextLimit,
     maxInputPrice,
-    maxPrice,
+    maxOutputPrice,
+    minInputPrice,
     minContext,
+    minOutputPrice,
     openOnly,
     providerApiFilter,
     q,
@@ -1499,6 +1617,7 @@ export function ModelsTable({
     setColumnFilters({});
     setColumnEmptyFilters({});
     setColumnBooleanFilters({});
+    setCostFreeFilters({});
     setSelectedCapabilities(new Set());
     setSelectedInputModalities(new Set());
     setSelectedOutputModalities(new Set());
@@ -1506,9 +1625,12 @@ export function ModelsTable({
     setSelectedFamilies(new Set());
     setSelectedStatuses(new Set());
     setOpenOnly(false);
-    setMaxPrice(MAX_PRICE);
-    setMaxInputPrice(MAX_INPUT_PRICE);
-    setMinContext(DEFAULT_MIN_CONTEXT);
+    setMinContext(null);
+    setMaxContextLimit(null);
+    setMinInputPrice(null);
+    setMaxInputPrice(null);
+    setMinOutputPrice(null);
+    setMaxOutputPrice(null);
     setReleaseAfter("");
     setReleaseBefore("");
     setProviderApiFilter("");
@@ -1544,6 +1666,15 @@ export function ModelsTable({
               <div className="brand-title">models.dev</div>
               <div className="brand-subtitle">catalog explorer</div>
             </div>
+            <button
+              aria-label="Collapse sidebar"
+              className="sidebar-toggle"
+              onClick={() => setSidebarOpen(false)}
+              title="Collapse sidebar"
+              type="button"
+            >
+              <span aria-hidden="true">‹</span>
+            </button>
           </section>
 
           <label className="rail-search">
@@ -1615,43 +1746,34 @@ export function ModelsTable({
           </FacetSection>
 
           <FacetSection title="limits and price">
-            <label className="range-filter">
-              <span>min context {formatContext(minContext)}</span>
-              <input
-                max={2_000_000}
-                min={DEFAULT_MIN_CONTEXT}
-                onChange={(event) => setMinContext(Number(event.target.value))}
-                step={8_000}
-                type="range"
-                value={minContext}
-              />
-            </label>
-            <label className="range-filter">
-              <span>
-                max input <strong>${trimNumber(maxInputPrice)}</strong> /M
-              </span>
-              <input
-                max={MAX_INPUT_PRICE}
-                min={0}
-                onChange={(event) => setMaxInputPrice(Number(event.target.value))}
-                step={0.25}
-                type="range"
-                value={maxInputPrice}
-              />
-            </label>
-            <label className="range-filter">
-              <span>
-                max output <strong>${trimNumber(maxPrice)}</strong> /M
-              </span>
-              <input
-                max={MAX_PRICE}
-                min={0.4}
-                onChange={(event) => setMaxPrice(Number(event.target.value))}
-                step={0.4}
-                type="range"
-                value={maxPrice}
-              />
-            </label>
+            <MiniNumberRangeFilter
+              label="context"
+              max={maxContext}
+              maxValue={maxContextLimit}
+              minValue={minContext}
+              onMaxChange={setMaxContextLimit}
+              onMinChange={setMinContext}
+              step={1000}
+              suffix="tokens"
+            />
+            <MiniNumberRangeFilter
+              label="input price"
+              maxValue={maxInputPrice}
+              minValue={minInputPrice}
+              onMaxChange={setMaxInputPrice}
+              onMinChange={setMinInputPrice}
+              step={0.01}
+              suffix="$/M"
+            />
+            <MiniNumberRangeFilter
+              label="output price"
+              maxValue={maxOutputPrice}
+              minValue={minOutputPrice}
+              onMaxChange={setMaxOutputPrice}
+              onMinChange={setMinOutputPrice}
+              step={0.01}
+              suffix="$/M"
+            />
           </FacetSection>
 
           <FacetSection title="dates">
@@ -1723,7 +1845,17 @@ export function ModelsTable({
             </div>
           </FacetSection>
         </aside>
-      ) : null}
+      ) : (
+        <button
+          aria-label="Expand sidebar"
+          className="sidebar-reopen"
+          onClick={() => setSidebarOpen(true)}
+          title="Expand sidebar"
+          type="button"
+        >
+          <span aria-hidden="true">›</span>
+        </button>
+      )}
 
       <section className="console-main">
         <header className="topbar">
@@ -1737,9 +1869,6 @@ export function ModelsTable({
           </div>
 
           <div className="topbar-actions">
-            <button onClick={() => setSidebarOpen((current) => !current)} type="button">
-              {sidebarOpen ? "Hide sidebar" : "Show sidebar"}
-            </button>
             <ColumnPicker
               columnSearch={columnSearch}
               columns={columns}
@@ -1755,24 +1884,6 @@ export function ModelsTable({
             <button disabled={isLoading} onClick={loadData} type="button">
               {isLoading ? "Refreshing" : "Refresh"}
             </button>
-            <SortPill
-              activeSort={sort}
-              label="date"
-              sortKey="model.release_date"
-              onSort={setSort}
-            />
-            <SortPill
-              activeSort={sort}
-              label="price"
-              sortKey="model.cost.output"
-              onSort={setSort}
-            />
-            <SortPill
-              activeSort={sort}
-              label="context"
-              sortKey="model.limit.context"
-              onSort={setSort}
-            />
           </div>
         </header>
 
@@ -1798,11 +1909,18 @@ export function ModelsTable({
                 <ColumnFilterControl
                   booleanMode={columnBooleanFilters[column.key] ?? "any"}
                   column={column}
+                  costFreeMode={costFreeFilters[column.key] ?? "include"}
                   emptyMode={columnEmptyFilters[column.key] ?? "any"}
                   key={column.key}
                   textValue={columnFilters[column.key] ?? ""}
                   onBooleanModeChange={(value) =>
                     setColumnBooleanFilters((current) => ({
+                      ...current,
+                      [column.key]: value,
+                    }))
+                  }
+                  onCostFreeModeChange={(value) =>
+                    setCostFreeFilters((current) => ({
                       ...current,
                       [column.key]: value,
                     }))
