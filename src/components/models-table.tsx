@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 
 const SOURCE_URL = "https://models.dev/api.json";
@@ -9,6 +9,7 @@ const MAX_INPUT_PRICE = 15;
 const DEFAULT_MIN_CONTEXT = 0;
 const INPUT_PRICE_SCALE = 15;
 const OUTPUT_PRICE_SCALE = 120;
+const FILTER_STORAGE_KEY = "models-dev-explorer-filters-v1";
 
 type Primitive = string | number | boolean | null | undefined;
 type JsonValue = Primitive | JsonValue[] | { [key: string]: JsonValue };
@@ -25,6 +26,9 @@ type SortState = {
   key: string;
   direction: SortDirection;
 };
+type ColumnKind = "boolean" | "number" | "text";
+type EmptyFilterMode = "any" | "filled" | "empty";
+type BooleanFilterMode = "any" | "true" | "false" | "empty";
 type CapabilityKey = "reasoning" | "tool" | "structured" | "vision" | "cache";
 type ModalityKey = "text" | "image" | "audio";
 type ColumnGroup =
@@ -41,6 +45,7 @@ type ColumnDef = {
   key: string;
   label: string;
   group: ColumnGroup;
+  kind: ColumnKind;
   align?: "left" | "right";
   width: number;
 };
@@ -82,6 +87,29 @@ type ProviderOption = {
   id: string;
   name: string;
   count: number;
+};
+
+type PersistedFilterState = {
+  q?: string;
+  columnFilters?: Record<string, string>;
+  columnEmptyFilters?: Record<string, EmptyFilterMode>;
+  columnBooleanFilters?: Record<string, BooleanFilterMode>;
+  selectedCapabilities?: CapabilityKey[];
+  selectedInputModalities?: ModalityKey[];
+  selectedOutputModalities?: ModalityKey[];
+  selectedProviders?: string[];
+  selectedFamilies?: string[];
+  selectedStatuses?: string[];
+  openOnly?: boolean;
+  maxPrice?: number;
+  maxInputPrice?: number;
+  minContext?: number;
+  releaseAfter?: string;
+  releaseBefore?: string;
+  providerApiFilter?: string;
+  sort?: SortState;
+  visibleColumnKeys?: string[];
+  sidebarOpen?: boolean;
 };
 
 const defaultColumnKeys = [
@@ -259,13 +287,22 @@ function groupForColumn(key: string): ColumnGroup {
   return "Other";
 }
 
-function labelForColumn(key: string) {
-  return key
-    .replace(/\./g, " / ")
-    .replace(/_/g, " ");
+function titleCase(value: string) {
+  return value
+    .split(" ")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
 }
 
-function widthForColumn(key: string) {
+function labelForColumn(key: string) {
+  return key
+    .split(".")
+    .map((part) => titleCase(part.replace(/_/g, " ")))
+    .join(" ");
+}
+
+function widthForColumn(key: string, label: string) {
   if (key === "model.capabilities") return 245;
   if (key === "model.name" || key === "model.id") return 220;
   if (key === "provider.name" || key === "provider.id") return 165;
@@ -273,10 +310,38 @@ function widthForColumn(key: string) {
   if (key.includes(".limit.")) return 112;
   if (key.includes("date") || key.includes("updated")) return 124;
   if (key.includes("modalities")) return 150;
-  return 150;
+  return Math.max(150, Math.min(260, label.length * 8));
 }
 
-function makeColumnDefs(keys: Set<string>) {
+function isEmptyValue(value: Primitive, formattedValue?: string) {
+  return (
+    value === null ||
+    value === undefined ||
+    (typeof formattedValue === "string" && formattedValue === "")
+  );
+}
+
+function cellIsEmpty(row: ModelRow, key: string) {
+  return isEmptyValue(row.rawValues[key], row.values[key] ?? "");
+}
+
+function classifyColumn(rows: ModelRow[], key: string): ColumnKind {
+  const nonEmptyValues = rows
+    .map((row) => row.rawValues[key])
+    .filter((value) => !isEmptyValue(value));
+
+  if (nonEmptyValues.length > 0 && nonEmptyValues.every((value) => typeof value === "boolean")) {
+    return "boolean";
+  }
+
+  if (nonEmptyValues.length > 0 && nonEmptyValues.every((value) => typeof value === "number")) {
+    return "number";
+  }
+
+  return "text";
+}
+
+function makeColumnDefs(keys: Set<string>, rows: ModelRow[]) {
   return [...keys]
     .sort((a, b) => {
       const aIndex = preferredColumnOrder.indexOf(a);
@@ -287,19 +352,24 @@ function makeColumnDefs(keys: Set<string>) {
       }
       return a.localeCompare(b);
     })
-    .map((key): ColumnDef => ({
-      key,
-      label: labelForColumn(key),
-      group: groupForColumn(key),
-      align:
-        key.includes(".cost.") ||
-        key.includes(".limit.") ||
-        key.includes("date") ||
-        key.includes("updated")
-          ? "right"
-          : "left",
-      width: widthForColumn(key),
-    }));
+    .map((key): ColumnDef => {
+      const label = labelForColumn(key);
+
+      return {
+        key,
+        label,
+        group: groupForColumn(key),
+        kind: classifyColumn(rows, key),
+        align:
+          key.includes(".cost.") ||
+          key.includes(".limit.") ||
+          key.includes("date") ||
+          key.includes("updated")
+            ? "right"
+            : "left",
+        width: widthForColumn(key, label),
+      };
+    });
 }
 
 function makeRows(payload: ApiPayload | null): PreparedData {
@@ -429,7 +499,7 @@ function makeRows(payload: ApiPayload | null): PreparedData {
   return {
     rows,
     providers: [...providerCounts.values()].sort((a, b) => a.name.localeCompare(b.name)),
-    columns: makeColumnDefs(columnKeys),
+    columns: makeColumnDefs(columnKeys, rows),
     families: [...families].sort((a, b) => a.localeCompare(b)),
     statuses: [...statuses].sort((a, b) => a.localeCompare(b)),
     maxContext: Math.max(1, ...rows.map((row) => row.context ?? 0)),
@@ -526,6 +596,8 @@ function countActiveFilters({
   providerApiFilter,
   selectedProviders,
   columnFilters,
+  columnEmptyFilters,
+  columnBooleanFilters,
 }: {
   q: string;
   selectedCapabilities: ReadonlySet<CapabilityKey>;
@@ -542,6 +614,8 @@ function countActiveFilters({
   providerApiFilter: string;
   selectedProviders: ReadonlySet<string>;
   columnFilters: Record<string, string>;
+  columnEmptyFilters: Record<string, EmptyFilterMode>;
+  columnBooleanFilters: Record<string, BooleanFilterMode>;
 }) {
   return (
     (q.trim() ? 1 : 0) +
@@ -558,7 +632,9 @@ function countActiveFilters({
     (releaseBefore ? 1 : 0) +
     (providerApiFilter.trim() ? 1 : 0) +
     selectedProviders.size +
-    Object.values(columnFilters).filter((value) => value.trim()).length
+    Object.values(columnFilters).filter((value) => value.trim()).length +
+    Object.values(columnEmptyFilters).filter((value) => value !== "any").length +
+    Object.values(columnBooleanFilters).filter((value) => value !== "any").length
   );
 }
 
@@ -571,6 +647,90 @@ function toggleSetValue<T>(set: ReadonlySet<T>, value: T) {
   }
 
   return next;
+}
+
+function cleanRecord<T extends string>(record: Record<string, T> | undefined, defaultValue: T) {
+  const entries = Object.entries(record ?? {}).filter(([, value]) => value && value !== defaultValue);
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
+}
+
+function cleanTextRecord(record: Record<string, string>) {
+  const entries = Object.entries(record)
+    .map(([key, value]) => [key, value.trim()] as const)
+    .filter(([, value]) => value);
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
+}
+
+function compactFilterState(state: PersistedFilterState): PersistedFilterState {
+  return {
+    q: state.q?.trim() || undefined,
+    columnFilters: cleanTextRecord(state.columnFilters ?? {}),
+    columnEmptyFilters: cleanRecord(state.columnEmptyFilters, "any"),
+    columnBooleanFilters: cleanRecord(state.columnBooleanFilters, "any"),
+    selectedCapabilities:
+      state.selectedCapabilities && state.selectedCapabilities.length > 0
+        ? state.selectedCapabilities
+        : undefined,
+    selectedInputModalities:
+      state.selectedInputModalities && state.selectedInputModalities.length > 0
+        ? state.selectedInputModalities
+        : undefined,
+    selectedOutputModalities:
+      state.selectedOutputModalities && state.selectedOutputModalities.length > 0
+        ? state.selectedOutputModalities
+        : undefined,
+    selectedProviders:
+      state.selectedProviders && state.selectedProviders.length > 0
+        ? state.selectedProviders
+        : undefined,
+    selectedFamilies:
+      state.selectedFamilies && state.selectedFamilies.length > 0 ? state.selectedFamilies : undefined,
+    selectedStatuses:
+      state.selectedStatuses && state.selectedStatuses.length > 0
+        ? state.selectedStatuses
+        : undefined,
+    openOnly: state.openOnly || undefined,
+    maxPrice: state.maxPrice !== undefined && state.maxPrice < MAX_PRICE ? state.maxPrice : undefined,
+    maxInputPrice:
+      state.maxInputPrice !== undefined && state.maxInputPrice < MAX_INPUT_PRICE
+        ? state.maxInputPrice
+        : undefined,
+    minContext:
+      state.minContext !== undefined && state.minContext > DEFAULT_MIN_CONTEXT
+        ? state.minContext
+        : undefined,
+    releaseAfter: state.releaseAfter || undefined,
+    releaseBefore: state.releaseBefore || undefined,
+    providerApiFilter: state.providerApiFilter?.trim() || undefined,
+    sort:
+      state.sort && (state.sort.key !== "model.release_date" || state.sort.direction !== "desc")
+        ? state.sort
+        : undefined,
+    visibleColumnKeys:
+      state.visibleColumnKeys &&
+      (state.visibleColumnKeys.length !== defaultColumnKeys.length ||
+        state.visibleColumnKeys.some((key, index) => key !== defaultColumnKeys[index]))
+        ? state.visibleColumnKeys
+        : undefined,
+    sidebarOpen: state.sidebarOpen === false ? false : undefined,
+  };
+}
+
+function hasPersistedValues(state: PersistedFilterState) {
+  return Object.values(state).some((value) => value !== undefined);
+}
+
+function parsePersistedFilterState(value: string | null): PersistedFilterState | null {
+  if (!value) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(value) as PersistedFilterState;
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
 }
 
 function CapabilityChip({
@@ -788,6 +948,62 @@ function ColumnPicker({
   );
 }
 
+function ColumnFilterControl({
+  column,
+  booleanMode,
+  emptyMode,
+  textValue,
+  onBooleanModeChange,
+  onEmptyModeChange,
+  onTextChange,
+}: {
+  column: ColumnDef;
+  booleanMode: BooleanFilterMode;
+  emptyMode: EmptyFilterMode;
+  textValue: string;
+  onBooleanModeChange: (value: BooleanFilterMode) => void;
+  onEmptyModeChange: (value: EmptyFilterMode) => void;
+  onTextChange: (value: string) => void;
+}) {
+  if (column.kind === "boolean") {
+    return (
+      <select
+        aria-label={`Boolean filter ${column.label}`}
+        className="column-filter-select boolean"
+        onChange={(event) => onBooleanModeChange(event.target.value as BooleanFilterMode)}
+        value={booleanMode}
+      >
+        <option value="any">any</option>
+        <option value="true">true</option>
+        <option value="false">false</option>
+        <option value="empty">empty</option>
+      </select>
+    );
+  }
+
+  return (
+    <div className="column-filter-control">
+      <input
+        aria-label={`Query filter ${column.label}`}
+        onChange={(event) => onTextChange(event.target.value)}
+        placeholder="q"
+        type="search"
+        value={textValue}
+      />
+      <select
+        aria-label={`Empty filter ${column.label}`}
+        className="column-filter-select"
+        onChange={(event) => onEmptyModeChange(event.target.value as EmptyFilterMode)}
+        value={emptyMode}
+      >
+        <option value="any">any</option>
+        <option value="filled">filled</option>
+        <option value="empty">empty</option>
+      </select>
+    </div>
+  );
+}
+
 function MetricCell({
   barColor,
   barWidth,
@@ -955,6 +1171,10 @@ export function ModelsTable({
   const [q, setQ] = useState("");
   const [columnSearch, setColumnSearch] = useState("");
   const [columnFilters, setColumnFilters] = useState<Record<string, string>>({});
+  const [columnEmptyFilters, setColumnEmptyFilters] = useState<Record<string, EmptyFilterMode>>({});
+  const [columnBooleanFilters, setColumnBooleanFilters] = useState<
+    Record<string, BooleanFilterMode>
+  >({});
   const [visibleColumnKeys, setVisibleColumnKeys] = useState<ReadonlySet<string>>(
     () => new Set(defaultColumnKeys),
   );
@@ -984,7 +1204,135 @@ export function ModelsTable({
   const [releaseBefore, setReleaseBefore] = useState("");
   const [providerApiFilter, setProviderApiFilter] = useState("");
   const [sort, setSort] = useState<SortState>({ key: "model.release_date", direction: "desc" });
+  const [hasLoadedPersistedFilters, setHasLoadedPersistedFilters] = useState(false);
   const tableScrollRef = useRef<HTMLDivElement>(null);
+
+  const currentPersistedState = useCallback((): PersistedFilterState => {
+    return compactFilterState({
+      q,
+      columnFilters,
+      columnEmptyFilters,
+      columnBooleanFilters,
+      selectedCapabilities: [...selectedCapabilities],
+      selectedInputModalities: [...selectedInputModalities],
+      selectedOutputModalities: [...selectedOutputModalities],
+      selectedProviders: [...selectedProviders],
+      selectedFamilies: [...selectedFamilies],
+      selectedStatuses: [...selectedStatuses],
+      openOnly,
+      maxPrice,
+      maxInputPrice,
+      minContext,
+      releaseAfter,
+      releaseBefore,
+      providerApiFilter,
+      sort,
+      visibleColumnKeys: [...visibleColumnKeys],
+      sidebarOpen,
+    });
+  }, [
+    columnBooleanFilters,
+    columnEmptyFilters,
+    columnFilters,
+    maxInputPrice,
+    maxPrice,
+    minContext,
+    openOnly,
+    providerApiFilter,
+    q,
+    releaseAfter,
+    releaseBefore,
+    selectedCapabilities,
+    selectedFamilies,
+    selectedInputModalities,
+    selectedOutputModalities,
+    selectedProviders,
+    selectedStatuses,
+    sidebarOpen,
+    sort,
+    visibleColumnKeys,
+  ]);
+
+  const applyPersistedState = useCallback((state: PersistedFilterState | null) => {
+    if (!state) {
+      return;
+    }
+
+    setQ(state.q ?? "");
+    setColumnFilters(state.columnFilters ?? {});
+    setColumnEmptyFilters(state.columnEmptyFilters ?? {});
+    setColumnBooleanFilters(state.columnBooleanFilters ?? {});
+    setSelectedCapabilities(new Set(state.selectedCapabilities ?? []));
+    setSelectedInputModalities(new Set(state.selectedInputModalities ?? []));
+    setSelectedOutputModalities(new Set(state.selectedOutputModalities ?? []));
+    setSelectedProviders(new Set(state.selectedProviders ?? []));
+    setSelectedFamilies(new Set(state.selectedFamilies ?? []));
+    setSelectedStatuses(new Set(state.selectedStatuses ?? []));
+    setOpenOnly(Boolean(state.openOnly));
+    setMaxPrice(typeof state.maxPrice === "number" ? state.maxPrice : MAX_PRICE);
+    setMaxInputPrice(
+      typeof state.maxInputPrice === "number" ? state.maxInputPrice : MAX_INPUT_PRICE,
+    );
+    setMinContext(
+      typeof state.minContext === "number" ? state.minContext : DEFAULT_MIN_CONTEXT,
+    );
+    setReleaseAfter(state.releaseAfter ?? "");
+    setReleaseBefore(state.releaseBefore ?? "");
+    setProviderApiFilter(state.providerApiFilter ?? "");
+    if (state.sort?.key && (state.sort.direction === "asc" || state.sort.direction === "desc")) {
+      setSort(state.sort);
+    }
+    if (state.visibleColumnKeys && state.visibleColumnKeys.length > 0) {
+      setVisibleColumnKeys(new Set(state.visibleColumnKeys));
+    }
+    if (typeof state.sidebarOpen === "boolean") {
+      setSidebarOpen(state.sidebarOpen);
+    }
+  }, []);
+
+  useEffect(() => {
+    function readUrlState() {
+      const params = new URLSearchParams(window.location.search);
+      return parsePersistedFilterState(params.get("filters"));
+    }
+
+    function readLocalState() {
+      return parsePersistedFilterState(window.localStorage.getItem(FILTER_STORAGE_KEY));
+    }
+
+    applyPersistedState(readUrlState() ?? readLocalState());
+    setHasLoadedPersistedFilters(true);
+
+    function handlePopState() {
+      applyPersistedState(readUrlState());
+    }
+
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, [applyPersistedState]);
+
+  useEffect(() => {
+    if (!hasLoadedPersistedFilters) {
+      return;
+    }
+
+    const state = currentPersistedState();
+    const nextUrl = new URL(window.location.href);
+
+    if (hasPersistedValues(state)) {
+      const serialized = JSON.stringify(state);
+      window.localStorage.setItem(FILTER_STORAGE_KEY, serialized);
+      nextUrl.searchParams.set("filters", serialized);
+    } else {
+      window.localStorage.removeItem(FILTER_STORAGE_KEY);
+      nextUrl.searchParams.delete("filters");
+    }
+
+    window.history.replaceState(null, "", nextUrl);
+  }, [
+    currentPersistedState,
+    hasLoadedPersistedFilters,
+  ]);
 
   async function loadData() {
     setIsLoading(true);
@@ -1041,6 +1389,8 @@ export function ModelsTable({
     providerApiFilter,
     selectedProviders,
     columnFilters,
+    columnEmptyFilters,
+    columnBooleanFilters,
   });
 
   const filteredRows = useMemo(() => {
@@ -1049,6 +1399,12 @@ export function ModelsTable({
     const activeColumnFilters = Object.entries(columnFilters)
       .map(([key, value]) => [key, value.trim().toLowerCase()] as const)
       .filter(([, value]) => value);
+    const activeEmptyFilters = Object.entries(columnEmptyFilters).filter(
+      ([, value]) => value !== "any",
+    );
+    const activeBooleanFilters = Object.entries(columnBooleanFilters).filter(
+      ([, value]) => value !== "any",
+    );
 
     return rows
       .filter((row) => {
@@ -1083,12 +1439,32 @@ export function ModelsTable({
         }
         if (releaseAfter && (!row.releaseDate || row.releaseDate < releaseAfter)) return false;
         if (releaseBefore && (!row.releaseDate || row.releaseDate > releaseBefore)) return false;
-        return activeColumnFilters.every(([key, value]) =>
-          (row.values[key] ?? "").toLowerCase().includes(value),
-        );
+        if (
+          !activeColumnFilters.every(([key, value]) =>
+            (row.values[key] ?? "").toLowerCase().includes(value),
+          )
+        ) {
+          return false;
+        }
+        if (
+          !activeEmptyFilters.every(([key, value]) => {
+            const isEmpty = cellIsEmpty(row, key);
+            return value === "empty" ? isEmpty : !isEmpty;
+          })
+        ) {
+          return false;
+        }
+        return activeBooleanFilters.every(([key, value]) => {
+          if (value === "empty") {
+            return cellIsEmpty(row, key);
+          }
+          return row.rawValues[key] === (value === "true");
+        });
       })
       .sort((a, b) => compareRows(a, b, sort));
   }, [
+    columnBooleanFilters,
+    columnEmptyFilters,
     columnFilters,
     maxInputPrice,
     maxPrice,
@@ -1121,6 +1497,8 @@ export function ModelsTable({
   function clearFilters() {
     setQ("");
     setColumnFilters({});
+    setColumnEmptyFilters({});
+    setColumnBooleanFilters({});
     setSelectedCapabilities(new Set());
     setSelectedInputModalities(new Set());
     setSelectedOutputModalities(new Set());
@@ -1417,18 +1795,30 @@ export function ModelsTable({
             </div>
             <div className="table-filter-row" style={{ gridTemplateColumns: gridTemplate }}>
               {visibleColumns.map((column) => (
-                <input
-                  aria-label={`Filter ${column.label}`}
+                <ColumnFilterControl
+                  booleanMode={columnBooleanFilters[column.key] ?? "any"}
+                  column={column}
+                  emptyMode={columnEmptyFilters[column.key] ?? "any"}
                   key={column.key}
-                  onChange={(event) =>
-                    setColumnFilters((current) => ({
+                  textValue={columnFilters[column.key] ?? ""}
+                  onBooleanModeChange={(value) =>
+                    setColumnBooleanFilters((current) => ({
                       ...current,
-                      [column.key]: event.target.value,
+                      [column.key]: value,
                     }))
                   }
-                  placeholder="filter"
-                  type="search"
-                  value={columnFilters[column.key] ?? ""}
+                  onEmptyModeChange={(value) =>
+                    setColumnEmptyFilters((current) => ({
+                      ...current,
+                      [column.key]: value,
+                    }))
+                  }
+                  onTextChange={(value) =>
+                    setColumnFilters((current) => ({
+                      ...current,
+                      [column.key]: value,
+                    }))
+                  }
                 />
               ))}
             </div>

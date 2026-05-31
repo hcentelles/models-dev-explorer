@@ -457,7 +457,7 @@ button:disabled {
   align-items: center;
   background: var(--panel);
   color: var(--ink3);
-  min-height: 54px;
+  min-height: 62px;
   padding: 0 14px;
   width: 100%;
 }
@@ -469,14 +469,17 @@ button:disabled {
   font-size: 10px;
   font-weight: 500;
   letter-spacing: 0.1em;
+  line-height: 1.25;
+  min-height: 38px;
   min-width: 0;
   overflow: hidden;
   padding: 0 10px 0 0;
   text-align: left;
   text-overflow: ellipsis;
   text-transform: uppercase;
-  white-space: nowrap;
+  white-space: normal;
   width: 100%;
+  word-break: normal;
 }
 
 .column-sort.right {
@@ -490,11 +493,19 @@ button:disabled {
 
 .table-filter-row {
   display: grid;
-  min-height: 42px;
+  min-height: 56px;
   padding: 6px 14px;
 }
 
-.table-filter-row input {
+.column-filter-control {
+  display: grid;
+  gap: 4px;
+  grid-template-columns: minmax(0, 1fr) 66px;
+  padding-right: 8px;
+}
+
+.table-filter-row input,
+.column-filter-select {
   background: var(--bg);
   border: 1px solid var(--line);
   border-radius: 5px;
@@ -502,13 +513,18 @@ button:disabled {
   font-family: var(--mono);
   font-size: 10.5px;
   height: 28px;
-  margin-right: 8px;
   min-width: 0;
   outline: 0;
   padding: 0 7px;
+  width: 100%;
 }
 
-.table-filter-row input:focus {
+.column-filter-select.boolean {
+  margin-right: 8px;
+}
+
+.table-filter-row input:focus,
+.column-filter-select:focus {
   border-color: var(--acid-d);
 }
 
