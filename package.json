@@ -1,7 +1,12 @@
 {
   "name": "models-dev-explorer",
   "version": "0.1.0",
-  "private": true,
+  "private": false,
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hcentelles/models-dev-explorer.git"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
