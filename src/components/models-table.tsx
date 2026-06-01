@@ -11,6 +11,7 @@ import {
   RefreshCwIcon,
   SearchIcon,
   SlidersHorizontalIcon,
+  XIcon,
 } from "lucide-react";
 
 import { ModeToggle } from "@/components/mode-toggle";
@@ -34,6 +35,12 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty";
 import { Field, FieldContent, FieldGroup, FieldLabel, FieldSet } from "@/components/ui/field";
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupInput,
+} from "@/components/ui/input-group";
 import { Input } from "@/components/ui/input";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Separator } from "@/components/ui/separator";
@@ -1113,55 +1120,108 @@ function ColumnFilterControl({
   onEmptyModeChange: (value: EmptyFilterMode) => void;
   onTextChange: (value: string) => void;
 }) {
+  const isCostColumn = column.key.includes(".cost.");
+  const hasTextFilter = Boolean(textValue.trim());
+  const hasModeFilter = emptyMode !== "any";
+  const hasBooleanFilter = booleanMode !== "any";
+  const hasFreeFilter = costFreeMode !== "include";
+  const compactColumn = column.width < 125;
+  const filterShellClassName =
+    "rounded-full border bg-muted/25 shadow-sm transition-colors focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/40";
+  const activeShellClassName = "border-primary/60 bg-primary/5";
+  const nativeSelectClassName =
+    "[&_[data-slot=native-select]]:h-7 [&_[data-slot=native-select]]:rounded-full [&_[data-slot=native-select]]:border-0 [&_[data-slot=native-select]]:bg-transparent [&_[data-slot=native-select]]:px-3 [&_[data-slot=native-select]]:pr-7 [&_[data-slot=native-select]]:font-mono [&_[data-slot=native-select]]:text-[11px] [&_[data-slot=native-select-icon]]:right-2";
+
   if (column.kind === "boolean") {
     return (
-      <NativeSelect
-        aria-label={`Boolean filter ${column.label}`}
-        className="w-full pr-2"
-        onChange={(event) => onBooleanModeChange(event.target.value as BooleanFilterMode)}
-        size="sm"
-        value={booleanMode}
-      >
-        <NativeSelectOption value="any">any</NativeSelectOption>
-        <NativeSelectOption value="true">true</NativeSelectOption>
-        <NativeSelectOption value="false">false</NativeSelectOption>
-        <NativeSelectOption value="empty">empty</NativeSelectOption>
-      </NativeSelect>
+      <div className="pr-2">
+        <NativeSelect
+          aria-label={`Boolean filter ${column.label}`}
+          className={cn(
+            "w-full",
+            filterShellClassName,
+            nativeSelectClassName,
+            hasBooleanFilter && activeShellClassName,
+          )}
+          onChange={(event) => onBooleanModeChange(event.target.value as BooleanFilterMode)}
+          size="sm"
+          value={booleanMode}
+        >
+          <NativeSelectOption value="any">any</NativeSelectOption>
+          <NativeSelectOption value="true">true</NativeSelectOption>
+          <NativeSelectOption value="false">false</NativeSelectOption>
+          <NativeSelectOption value="empty">empty</NativeSelectOption>
+        </NativeSelect>
+      </div>
     );
   }
 
   return (
-    <div className={cn("grid gap-1 pr-2", !column.key.includes(".cost.") && "grid-cols-[minmax(0,1fr)_68px]")}>
-      <Input
-        aria-label={`Filter ${column.label}`}
-        className="h-7 rounded-md px-2 font-mono text-[11px]"
-        onChange={(event) => onTextChange(event.target.value)}
-        placeholder="filter"
-        type="search"
-        value={textValue}
-      />
-      <NativeSelect
-        aria-label={`Empty filter ${column.label}`}
-        className="w-full"
-        onChange={(event) => onEmptyModeChange(event.target.value as EmptyFilterMode)}
-        size="sm"
-        value={emptyMode}
+    <div className="flex min-w-0 flex-col gap-1 pr-2">
+      <div
+        className={cn(
+          "flex min-w-0 items-center",
+          filterShellClassName,
+          (hasTextFilter || hasModeFilter) && activeShellClassName,
+        )}
       >
-        <NativeSelectOption value="any">any</NativeSelectOption>
-        <NativeSelectOption value="filled">filled</NativeSelectOption>
-        <NativeSelectOption value="empty">empty</NativeSelectOption>
-      </NativeSelect>
-      {column.key.includes(".cost.") ? (
+        <InputGroup className="h-8 flex-1 border-0 bg-transparent shadow-none ring-0">
+          <InputGroupInput
+            aria-label={`Filter ${column.label}`}
+            className="h-8 px-1 font-mono text-[12px]"
+            onChange={(event) => onTextChange(event.target.value)}
+            placeholder=""
+            type="search"
+            value={textValue}
+          />
+          <InputGroupAddon align="inline-start" className="pl-2 pr-1">
+            <SearchIcon />
+          </InputGroupAddon>
+          {hasTextFilter ? (
+            <InputGroupAddon align="inline-end" className="pl-0 pr-1">
+              <InputGroupButton
+                aria-label={`Clear filter ${column.label}`}
+                onClick={() => onTextChange("")}
+                size="icon-xs"
+              >
+                <XIcon />
+              </InputGroupButton>
+            </InputGroupAddon>
+          ) : null}
+        </InputGroup>
+        <Separator className="h-4" orientation="vertical" />
+        <NativeSelect
+          aria-label={`Empty filter ${column.label}`}
+          className={cn(
+            compactColumn ? "w-[58px] shrink-0" : "w-[76px] shrink-0",
+            nativeSelectClassName,
+            hasModeFilter && "[&_[data-slot=native-select]]:text-foreground",
+          )}
+          onChange={(event) => onEmptyModeChange(event.target.value as EmptyFilterMode)}
+          size="sm"
+          value={emptyMode}
+        >
+          <NativeSelectOption value="any">any</NativeSelectOption>
+          <NativeSelectOption value="filled">filled</NativeSelectOption>
+          <NativeSelectOption value="empty">empty</NativeSelectOption>
+        </NativeSelect>
+      </div>
+      {isCostColumn ? (
         <NativeSelect
           aria-label={`Free filter ${column.label}`}
-          className="col-span-full w-full"
+          className={cn(
+            "w-full",
+            filterShellClassName,
+            nativeSelectClassName,
+            hasFreeFilter && activeShellClassName,
+          )}
           onChange={(event) => onCostFreeModeChange(event.target.value as CostFreeMode)}
           size="sm"
           value={costFreeMode}
         >
-          <NativeSelectOption value="include">include free</NativeSelectOption>
-          <NativeSelectOption value="exclude">exclude free</NativeSelectOption>
-          <NativeSelectOption value="only">only free</NativeSelectOption>
+          <NativeSelectOption value="include">any</NativeSelectOption>
+          <NativeSelectOption value="exclude">paid</NativeSelectOption>
+          <NativeSelectOption value="only">free</NativeSelectOption>
         </NativeSelect>
       ) : null}
     </div>
@@ -2071,7 +2131,10 @@ export function ModelsTable({
                 </HeaderButton>
               ))}
             </div>
-            <div className="grid min-h-14 px-3 py-2" style={{ gridTemplateColumns: gridTemplate }}>
+            <div
+              className="grid min-h-20 items-start border-t bg-muted/10 px-3 py-3"
+              style={{ gridTemplateColumns: gridTemplate }}
+            >
               {visibleColumns.map((column) => (
                 <ColumnFilterControl
                   booleanMode={columnBooleanFilters[column.key] ?? "any"}
