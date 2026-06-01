@@ -27,12 +27,10 @@ export default async function Home() {
   }
 
   return (
-    <main className="min-h-screen bg-slate-50 text-slate-950">
-      <ModelsTable
-        initialError={error}
-        initialFetchedAt={payload ? new Date().toISOString() : null}
-        initialPayload={payload}
-      />
-    </main>
+    <ModelsTable
+      initialError={error}
+      initialFetchedAt={payload ? new Date().toISOString() : null}
+      initialPayload={payload}
+    />
   );
 }

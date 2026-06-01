@@ -2,6 +2,58 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
+import {
+  ArrowDownIcon,
+  ArrowUpIcon,
+  Columns3Icon,
+  DatabaseIcon,
+  PanelLeftIcon,
+  RefreshCwIcon,
+  SearchIcon,
+  SlidersHorizontalIcon,
+} from "lucide-react";
+
+import { ModeToggle } from "@/components/mode-toggle";
+import { Badge } from "@/components/ui/badge";
+import { Button, buttonVariants } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty";
+import { Field, FieldContent, FieldGroup, FieldLabel, FieldSet } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
+import { Separator } from "@/components/ui/separator";
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarGroup,
+  SidebarGroupContent,
+  SidebarGroupLabel,
+  SidebarHeader,
+  SidebarInset,
+  SidebarInput,
+  SidebarProvider,
+  SidebarRail,
+  SidebarTrigger,
+} from "@/components/ui/sidebar";
+import { Spinner } from "@/components/ui/spinner";
+import { Switch } from "@/components/ui/switch";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
 
 const SOURCE_URL = "https://models.dev/api.json";
 const DEFAULT_MIN_CONTEXT = 0;
@@ -773,25 +825,22 @@ function CapabilityChip({
   label: string;
 }) {
   return (
-    <span
-      className={`rounded-[3px] border px-1.5 py-0.5 text-[9px] leading-none ${
-        isOn
-          ? "border-[rgba(200,242,78,.3)] bg-[rgba(200,242,78,.1)] text-[var(--acid)]"
-          : "border-[var(--line)] bg-[var(--panel2)] text-[var(--ink3)] opacity-50"
-      }`}
+    <Badge
+      className={cn("h-5 rounded-md px-1.5 font-mono text-[10px]", !isOn && "opacity-45")}
       title={label}
+      variant={isOn ? "secondary" : "outline"}
     >
       {glyph}
-    </span>
+    </Badge>
   );
 }
 
-function Bar({ color, value }: { color: string; value: number }) {
+function Bar({ className, value }: { className?: string; value: number }) {
   return (
-    <span className="mt-1 block h-[3px] w-[64px] overflow-hidden rounded-full bg-[var(--line2)]">
+    <span className="mt-1 block h-1 w-16 overflow-hidden rounded-full bg-muted">
       <span
-        className="block h-full rounded-full"
-        style={{ background: color, width: `${Math.max(0, Math.min(100, value))}%` }}
+        className={cn("block h-full rounded-full bg-primary", className)}
+        style={{ width: `${Math.max(0, Math.min(100, value))}%` }}
       />
     </span>
   );
@@ -813,14 +862,26 @@ function HeaderButton({
   const active = activeSort.key === sortKey;
 
   return (
-    <button
-      className={`column-sort ${align === "right" ? "right" : ""} ${active ? "active" : ""}`}
+    <Button
+      className={cn(
+        "h-auto min-h-10 justify-start whitespace-normal rounded-md px-2 py-1.5 text-left font-mono text-[11px] uppercase leading-tight text-muted-foreground",
+        align === "right" && "justify-end text-right",
+        active && "text-foreground",
+      )}
       onClick={() => onSort(sortKey)}
+      size="sm"
       type="button"
+      variant="ghost"
     >
-      {children}
-      {active ? (activeSort.direction === "asc" ? "▲" : "▼") : ""}
-    </button>
+      <span className="min-w-0 truncate">{children}</span>
+      {active ? (
+        activeSort.direction === "asc" ? (
+          <ArrowUpIcon data-icon="inline-end" />
+        ) : (
+          <ArrowDownIcon data-icon="inline-end" />
+        )
+      ) : null}
+    </Button>
   );
 }
 
@@ -834,19 +895,21 @@ function FacetCheckbox({
   onChange: () => void;
 }) {
   return (
-    <button className={`facet-check ${checked ? "checked" : ""}`} onClick={onChange} type="button">
-      <span>{checked ? "x" : ""}</span>
-      <span>{label}</span>
-    </button>
+    <Field orientation="horizontal">
+      <Checkbox checked={checked} onCheckedChange={onChange} />
+      <FieldLabel className="min-w-0 flex-1 cursor-pointer font-mono text-xs text-sidebar-foreground/80">
+        {label}
+      </FieldLabel>
+    </Field>
   );
 }
 
 function FacetSection({ children, title }: { children: React.ReactNode; title: string }) {
   return (
-    <section className="facet-section">
-      <h2>{title}</h2>
-      {children}
-    </section>
+    <SidebarGroup>
+      <SidebarGroupLabel className="font-mono uppercase tracking-wide">{title}</SidebarGroupLabel>
+      <SidebarGroupContent className="flex flex-col gap-2">{children}</SidebarGroupContent>
+    </SidebarGroup>
   );
 }
 
@@ -862,15 +925,18 @@ function MiniTextFilter({
   value: string;
 }) {
   return (
-    <label className="mini-filter">
-      <span>{label}</span>
-      <input
+    <Field className="gap-1.5">
+      <FieldLabel className="font-mono text-[11px] uppercase text-muted-foreground">
+        {label}
+      </FieldLabel>
+      <Input
+        className="h-8 font-mono text-xs"
         onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}
         type="search"
         value={value}
       />
-    </label>
+    </Field>
   );
 }
 
@@ -894,12 +960,17 @@ function MiniNumberRangeFilter({
   suffix?: string;
 }) {
   return (
-    <div className="mini-range-filter">
-      <div>{label}</div>
-      <div className="mini-range-inputs">
-        <label>
-          <span>min</span>
-          <input
+    <FieldSet className="gap-2">
+      <FieldLabel className="font-mono text-[11px] uppercase text-muted-foreground">
+        {label}
+      </FieldLabel>
+      <FieldGroup className="grid grid-cols-2 gap-2">
+        <Field className="gap-1">
+          <FieldLabel className="font-mono text-[10px] uppercase text-muted-foreground">
+            min
+          </FieldLabel>
+          <Input
+            className="h-8 font-mono text-xs"
             min={0}
             max={max}
             onChange={(event) => onMinChange(parseNumberInputValue(event.target.value))}
@@ -908,10 +979,13 @@ function MiniNumberRangeFilter({
             type="number"
             value={formatNumberInputValue(minValue)}
           />
-        </label>
-        <label>
-          <span>max</span>
-          <input
+        </Field>
+        <Field className="gap-1">
+          <FieldLabel className="font-mono text-[10px] uppercase text-muted-foreground">
+            max
+          </FieldLabel>
+          <Input
+            className="h-8 font-mono text-xs"
             min={0}
             max={max}
             onChange={(event) => onMaxChange(parseNumberInputValue(event.target.value))}
@@ -920,10 +994,10 @@ function MiniNumberRangeFilter({
             type="number"
             value={formatNumberInputValue(maxValue)}
           />
-        </label>
-      </div>
-      {suffix ? <div className="mini-range-suffix">{suffix}</div> : null}
-    </div>
+        </Field>
+      </FieldGroup>
+      {suffix ? <div className="font-mono text-[10px] uppercase text-muted-foreground">{suffix}</div> : null}
+    </FieldSet>
   );
 }
 
@@ -959,50 +1033,62 @@ function ColumnPicker({
   }, {});
 
   return (
-    <details className="column-picker">
-      <summary>
-        columns <span>{visibleColumnKeys.size}/{columns.length}</span>
-      </summary>
-      <div className="column-picker-panel">
-        <div className="column-picker-controls">
-          <input
+    <DropdownMenu>
+      <DropdownMenuTrigger render={<Button size="sm" variant="outline" />}>
+        <Columns3Icon data-icon="inline-start" />
+        Columns
+        <Badge className="ml-1 font-mono" variant="secondary">
+          {visibleColumnKeys.size}/{columns.length}
+        </Badge>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="max-h-[70vh] w-[min(760px,calc(100vw-2rem))] p-3">
+        <DropdownMenuGroup className="flex flex-col gap-3">
+          <Field>
+            <FieldLabel className="sr-only">Find columns</FieldLabel>
+            <Input
+              className="font-mono text-xs"
+              onKeyDown={(event) => event.stopPropagation()}
+              onKeyUp={(event) => event.stopPropagation()}
             onChange={(event) => onColumnSearchChange(event.target.value)}
             placeholder="find columns..."
             type="search"
             value={columnSearch}
           />
-          <button onClick={onDefault} type="button">
-            Default
-          </button>
-          <button onClick={onShowAll} type="button">
-            Show all
-          </button>
-        </div>
-        <div className="column-groups">
+          </Field>
+          <div className="flex gap-2">
+            <Button onClick={onDefault} size="sm" type="button" variant="secondary">
+              Default
+            </Button>
+            <Button onClick={onShowAll} size="sm" type="button" variant="outline">
+              Show all
+            </Button>
+          </div>
+        </DropdownMenuGroup>
+        <DropdownMenuSeparator />
+        <div className="grid max-h-[52vh] gap-4 overflow-auto md:grid-cols-3">
           {Object.entries(groups).map(([group, groupColumns]) => (
-            <section key={group}>
-              <h3>{group}</h3>
+            <DropdownMenuGroup className="flex flex-col gap-1" key={group}>
+              <DropdownMenuLabel>{group}</DropdownMenuLabel>
               {groupColumns.map((column) => {
                 const checked = visibleColumnKeys.has(column.key);
                 const disabled = checked && visibleColumnKeys.size === 1;
 
                 return (
-                  <label className="column-option" key={column.key}>
-                    <input
+                  <DropdownMenuCheckboxItem
                       checked={checked}
                       disabled={disabled}
+                    key={column.key}
                       onChange={() => onToggle(column.key)}
-                      type="checkbox"
-                    />
-                    <span>{column.label}</span>
-                  </label>
+                  >
+                    {column.label}
+                  </DropdownMenuCheckboxItem>
                 );
               })}
-            </section>
+            </DropdownMenuGroup>
           ))}
         </div>
-      </div>
-    </details>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -1029,62 +1115,66 @@ function ColumnFilterControl({
 }) {
   if (column.kind === "boolean") {
     return (
-      <select
+      <NativeSelect
         aria-label={`Boolean filter ${column.label}`}
-        className="column-filter-select boolean"
+        className="w-full pr-2"
         onChange={(event) => onBooleanModeChange(event.target.value as BooleanFilterMode)}
+        size="sm"
         value={booleanMode}
       >
-        <option value="any">any</option>
-        <option value="true">true</option>
-        <option value="false">false</option>
-        <option value="empty">empty</option>
-      </select>
+        <NativeSelectOption value="any">any</NativeSelectOption>
+        <NativeSelectOption value="true">true</NativeSelectOption>
+        <NativeSelectOption value="false">false</NativeSelectOption>
+        <NativeSelectOption value="empty">empty</NativeSelectOption>
+      </NativeSelect>
     );
   }
 
   return (
-    <div className={`column-filter-control ${column.key.includes(".cost.") ? "cost" : ""}`}>
-      <input
+    <div className={cn("grid gap-1 pr-2", !column.key.includes(".cost.") && "grid-cols-[minmax(0,1fr)_68px]")}>
+      <Input
         aria-label={`Filter ${column.label}`}
+        className="h-7 rounded-md px-2 font-mono text-[11px]"
         onChange={(event) => onTextChange(event.target.value)}
         placeholder="filter"
         type="search"
         value={textValue}
       />
-      <select
+      <NativeSelect
         aria-label={`Empty filter ${column.label}`}
-        className="column-filter-select"
+        className="w-full"
         onChange={(event) => onEmptyModeChange(event.target.value as EmptyFilterMode)}
+        size="sm"
         value={emptyMode}
       >
-        <option value="any">any</option>
-        <option value="filled">filled</option>
-        <option value="empty">empty</option>
-      </select>
+        <NativeSelectOption value="any">any</NativeSelectOption>
+        <NativeSelectOption value="filled">filled</NativeSelectOption>
+        <NativeSelectOption value="empty">empty</NativeSelectOption>
+      </NativeSelect>
       {column.key.includes(".cost.") ? (
-        <select
+        <NativeSelect
           aria-label={`Free filter ${column.label}`}
-          className="column-filter-select free"
+          className="col-span-full w-full"
           onChange={(event) => onCostFreeModeChange(event.target.value as CostFreeMode)}
+          size="sm"
           value={costFreeMode}
         >
-          <option value="include">include free</option>
-          <option value="exclude">exclude free</option>
-          <option value="only">only free</option>
-        </select>
+          <NativeSelectOption value="include">include free</NativeSelectOption>
+          <NativeSelectOption value="exclude">exclude free</NativeSelectOption>
+          <NativeSelectOption value="only">only free</NativeSelectOption>
+        </NativeSelect>
       ) : null}
     </div>
   );
 }
 
 function MetricCell({
-  barColor,
+  barClassName,
   barWidth,
   className,
   value,
 }: {
-  barColor: string;
+  barClassName?: string;
   barWidth: number;
   className?: string;
   value: string;
@@ -1092,9 +1182,9 @@ function MetricCell({
   const isNull = value === "null";
 
   return (
-    <div className={`metric-cell ${className ?? ""} ${isNull ? "nullish" : ""}`}>
+    <div className={cn("flex flex-col items-end pr-2 font-mono tabular-nums", className, isNull && "text-muted-foreground")}>
       <span>{value}</span>
-      <Bar color={barColor} value={barWidth} />
+      <Bar className={barClassName} value={barWidth} />
     </div>
   );
 }
@@ -1110,28 +1200,32 @@ function CellValue({
 }) {
   if (column.key === "provider.name") {
     return (
-      <div className="provider-cell">
+      <div className="flex min-w-0 items-center gap-2">
         <span
-          className="provider-dot"
+          className="block size-2 rounded-sm"
           style={{ background: providerColor(row.providerId, row.providerName) }}
         />
-        <span>{row.providerName}</span>
+        <span className="truncate">{row.providerName}</span>
       </div>
     );
   }
 
   if (column.key === "model.name") {
     return (
-      <div className="model-cell">
-        <span>{row.modelName}</span>
-        {row.openWeights ? <span className="oss-badge">OSS</span> : null}
+      <div className="flex min-w-0 items-center gap-2 font-medium text-foreground">
+        <span className="truncate">{row.modelName}</span>
+        {row.openWeights ? (
+          <Badge className="h-5 rounded-md px-1.5 font-mono text-[10px]" variant="outline">
+            OSS
+          </Badge>
+        ) : null}
       </div>
     );
   }
 
   if (column.key === "model.capabilities") {
     return (
-      <div className="cap-cell">
+      <div className="flex min-w-0 flex-nowrap gap-1">
         {capabilityOptions.map((capability) => (
           <CapabilityChip
             glyph={capability.glyph}
@@ -1152,9 +1246,8 @@ function CellValue({
 
     return (
       <MetricCell
-        barColor="var(--cyan)"
         barWidth={width}
-        className="context-value"
+        className="text-primary"
         value={formatContext(row.context)}
       />
     );
@@ -1163,7 +1256,7 @@ function CellValue({
   if (column.key === "model.cost.input") {
     return (
       <MetricCell
-        barColor="var(--blue)"
+        barClassName="bg-chart-2"
         barWidth={row.inputPrice === null ? 0 : (row.inputPrice / INPUT_PRICE_SCALE) * 100}
         value={formatPrice(row.inputPrice)}
       />
@@ -1173,7 +1266,7 @@ function CellValue({
   if (column.key === "model.cost.output") {
     return (
       <MetricCell
-        barColor="var(--acid-d)"
+        barClassName="bg-chart-3"
         barWidth={row.outputPrice === null ? 0 : (row.outputPrice / OUTPUT_PRICE_SCALE) * 100}
         value={formatPrice(row.outputPrice)}
       />
@@ -1183,13 +1276,13 @@ function CellValue({
   if (column.key.includes(".cost.")) {
     const rawValue = row.rawValues[column.key];
     const value = typeof rawValue === "number" ? rawValue : null;
-    return <span className={value === null ? "nullish" : ""}>{formatPrice(value)}</span>;
+    return <span className={value === null ? "text-muted-foreground" : ""}>{formatPrice(value)}</span>;
   }
 
   if (column.key.includes(".limit.")) {
     const rawValue = row.rawValues[column.key];
     const value = typeof rawValue === "number" ? rawValue : null;
-    return <span className={value === null ? "nullish" : ""}>{formatContext(value)}</span>;
+    return <span className={value === null ? "text-muted-foreground" : ""}>{formatContext(value)}</span>;
   }
 
   return <span>{row.values[column.key] || "—"}</span>;
@@ -1210,14 +1303,16 @@ function ModelResultRow({
 }) {
   return (
     <div
-      className="result-row"
+      className="absolute left-0 right-0 top-0 grid min-h-[62px] items-center border-b text-xs text-muted-foreground transition-colors hover:bg-muted/50"
       style={{ gridTemplateColumns: gridTemplate, transform: `translateY(${start}px)` }}
     >
       {columns.map((column) => (
         <div
-          className={`result-cell ${column.align === "right" ? "right" : ""} ${
-            column.key === "model.family" ? "family-cell" : ""
-          }`}
+          className={cn(
+            "min-w-0 truncate px-2",
+            column.align === "right" && "text-right tabular-nums",
+            column.key === "model.family" && "text-muted-foreground",
+          )}
           key={`${row.id}:${column.key}`}
           title={row.values[column.key]}
         >
@@ -1673,86 +1768,117 @@ export function ModelsTable({
   }
 
   return (
-    <main className={`console-shell ${sidebarOpen ? "" : "rail-hidden"}`}>
-      {sidebarOpen ? (
-        <aside className="console-rail">
-          <section className="brand-block">
-            <div className="brand-mark">◇</div>
-            <div>
-              <div className="brand-title">models.dev</div>
-              <div className="brand-subtitle">catalog explorer</div>
+    <SidebarProvider
+      className="h-svh overflow-hidden bg-background text-foreground"
+      open={sidebarOpen}
+      onOpenChange={setSidebarOpen}
+      style={
+        {
+          "--sidebar-width": "17rem",
+        } as React.CSSProperties
+      }
+    >
+      <Sidebar collapsible="offcanvas" className="border-sidebar-border">
+        <SidebarHeader className="gap-3 border-b border-sidebar-border p-3">
+          <div className="flex items-center gap-3">
+            <div className="grid size-9 shrink-0 place-items-center rounded-lg bg-primary font-mono text-sm font-semibold text-primary-foreground">
+              md
             </div>
-            <button
-              aria-label="Collapse sidebar"
-              className="sidebar-toggle"
-              onClick={() => setSidebarOpen(false)}
-              title="Collapse sidebar"
-              type="button"
-            >
-              <span aria-hidden="true">‹</span>
-            </button>
-          </section>
-
-          <label className="rail-search">
-            <span>/</span>
-            <input
-              onChange={(event) => setQ(event.target.value)}
-              placeholder="filter..."
-              type="search"
-              value={q}
-            />
-          </label>
-
-          <button className="clear-filters" onClick={clearFilters} type="button">
-            {activeFilterCount > 0
-              ? `clean all filters (${activeFilterCount})`
-              : "clean all filters"}
-          </button>
-
-          <FacetSection title="capabilities">
-            {capabilityOptions.map((capability) => (
-              <FacetCheckbox
-                checked={selectedCapabilities.has(capability.key)}
-                key={capability.key}
-                label={capability.label}
-                onChange={() =>
-                  setSelectedCapabilities((current) => toggleSetValue(current, capability.key))
-                }
+            <div className="min-w-0 flex-1">
+              <div className="truncate font-mono text-sm font-semibold">models.dev</div>
+              <div className="truncate font-mono text-[10px] uppercase tracking-wide text-muted-foreground">
+                catalog explorer
+              </div>
+            </div>
+            <Tooltip>
+              <TooltipTrigger render={<SidebarTrigger aria-label="Collapse sidebar" />}>
+                <PanelLeftIcon />
+              </TooltipTrigger>
+              <TooltipContent>Toggle sidebar</TooltipContent>
+            </Tooltip>
+          </div>
+          <Field className="gap-1">
+            <FieldLabel className="sr-only">Search models</FieldLabel>
+            <div className="relative">
+              <SearchIcon className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <SidebarInput
+                className="pl-8 font-mono text-xs"
+                onChange={(event) => setQ(event.target.value)}
+                placeholder="filter..."
+                type="search"
+                value={q}
               />
-            ))}
+            </div>
+          </Field>
+          <Button onClick={clearFilters} size="sm" type="button" variant="outline">
+            <SlidersHorizontalIcon data-icon="inline-start" />
+            {activeFilterCount > 0
+              ? `Clean all filters (${activeFilterCount})`
+              : "Clean all filters"}
+          </Button>
+        </SidebarHeader>
+
+        <SidebarContent>
+          <FacetSection title="capabilities">
+            <FieldGroup className="gap-2">
+              {capabilityOptions.map((capability) => (
+                <FacetCheckbox
+                  checked={selectedCapabilities.has(capability.key)}
+                  key={capability.key}
+                  label={capability.label}
+                  onChange={() =>
+                    setSelectedCapabilities((current) => toggleSetValue(current, capability.key))
+                  }
+                />
+              ))}
+            </FieldGroup>
           </FacetSection>
 
           <FacetSection title="modality">
-            <div className="facet-subtitle">input</div>
-            {modalityOptions.map((modality) => (
-              <FacetCheckbox
-                checked={selectedInputModalities.has(modality.key)}
-                key={`input-${modality.key}`}
-                label={modality.label}
-                onChange={() =>
-                  setSelectedInputModalities((current) => toggleSetValue(current, modality.key))
-                }
-              />
-            ))}
-            <div className="facet-subtitle">output</div>
-            {modalityOptions.map((modality) => (
-              <FacetCheckbox
-                checked={selectedOutputModalities.has(modality.key)}
-                key={`output-${modality.key}`}
-                label={modality.label}
-                onChange={() =>
-                  setSelectedOutputModalities((current) => toggleSetValue(current, modality.key))
-                }
-              />
-            ))}
+            <div className="font-mono text-[10px] uppercase tracking-wide text-muted-foreground">
+              input
+            </div>
+            <FieldGroup className="gap-2">
+              {modalityOptions.map((modality) => (
+                <FacetCheckbox
+                  checked={selectedInputModalities.has(modality.key)}
+                  key={`input-${modality.key}`}
+                  label={modality.label}
+                  onChange={() =>
+                    setSelectedInputModalities((current) => toggleSetValue(current, modality.key))
+                  }
+                />
+              ))}
+            </FieldGroup>
+            <Separator />
+            <div className="font-mono text-[10px] uppercase tracking-wide text-muted-foreground">
+              output
+            </div>
+            <FieldGroup className="gap-2">
+              {modalityOptions.map((modality) => (
+                <FacetCheckbox
+                  checked={selectedOutputModalities.has(modality.key)}
+                  key={`output-${modality.key}`}
+                  label={modality.label}
+                  onChange={() =>
+                    setSelectedOutputModalities((current) => toggleSetValue(current, modality.key))
+                  }
+                />
+              ))}
+            </FieldGroup>
           </FacetSection>
 
           <FacetSection title="identity">
-            <FacetCheckbox
-              checked={openOnly}
-              label="open weights only"
-              onChange={() => setOpenOnly((current) => !current)}
-            />
+            <Field orientation="horizontal">
+              <Switch
+                checked={openOnly}
+                onCheckedChange={() => setOpenOnly((current) => !current)}
+                size="sm"
+              />
+              <FieldContent>
+                <FieldLabel className="font-mono text-xs">open weights only</FieldLabel>
+              </FieldContent>
+            </Field>
             <MiniTextFilter
               label="provider api"
               onChange={setProviderApiFilter}
@@ -1808,83 +1934,92 @@ export function ModelsTable({
           </FacetSection>
 
           <FacetSection title="families">
-            <div className="provider-list">
-              {families.slice(0, 80).map((family) => (
-                <button
-                  className={`provider-filter ${selectedFamilies.has(family) ? "selected" : ""}`}
-                  key={family}
-                  onClick={() => setSelectedFamilies((current) => toggleSetValue(current, family))}
-                  type="button"
-                >
-                  <span className="provider-dot family-dot" />
-                  <span className="provider-name">{family}</span>
-                  <span className="provider-count" />
-                </button>
-              ))}
+            <div className="flex max-h-44 flex-col gap-1 overflow-auto pr-1">
+              {families.slice(0, 80).map((family) => {
+                const selected = selectedFamilies.has(family);
+
+                return (
+                  <Button
+                    className={cn("h-7 justify-start px-2 font-mono text-xs", selected && "bg-sidebar-accent text-sidebar-accent-foreground")}
+                    key={family}
+                    onClick={() => setSelectedFamilies((current) => toggleSetValue(current, family))}
+                    size="sm"
+                    type="button"
+                    variant="ghost"
+                  >
+                    <span className="block size-2 rounded-sm bg-muted-foreground/50" />
+                    <span className="min-w-0 flex-1 truncate text-left">{family}</span>
+                  </Button>
+                );
+              })}
             </div>
           </FacetSection>
 
           {statuses.length > 0 ? (
             <FacetSection title="status">
-              {statuses.map((status) => (
-                <FacetCheckbox
-                  checked={selectedStatuses.has(status)}
-                  key={status}
-                  label={status}
-                  onChange={() => setSelectedStatuses((current) => toggleSetValue(current, status))}
-                />
-              ))}
+              <FieldGroup className="gap-2">
+                {statuses.map((status) => (
+                  <FacetCheckbox
+                    checked={selectedStatuses.has(status)}
+                    key={status}
+                    label={status}
+                    onChange={() =>
+                      setSelectedStatuses((current) => toggleSetValue(current, status))
+                    }
+                  />
+                ))}
+              </FieldGroup>
             </FacetSection>
           ) : null}
 
           <FacetSection title="providers">
-            <div className="provider-list">
+            <div className="flex max-h-52 flex-col gap-1 overflow-auto pr-1">
               {providers.map((provider) => {
                 const selected = selectedProviders.has(provider.id);
                 const color = providerColor(provider.id, provider.name);
 
                 return (
-                  <button
-                    className={`provider-filter ${selected ? "selected" : ""}`}
+                  <Button
+                    className={cn("h-7 justify-start px-2 font-mono text-xs", selected && "bg-sidebar-accent text-sidebar-accent-foreground")}
                     key={provider.id}
                     onClick={() =>
                       setSelectedProviders((current) => toggleSetValue(current, provider.id))
                     }
+                    size="sm"
                     type="button"
+                    variant="ghost"
                   >
-                    <span className="provider-dot" style={{ background: color }} />
-                    <span className="provider-name">{provider.name}</span>
-                    <span className="provider-count">{provider.count}</span>
-                  </button>
+                    <span className="block size-2 rounded-sm" style={{ background: color }} />
+                    <span className="min-w-0 flex-1 truncate text-left">{provider.name}</span>
+                    <Badge className="h-5 rounded-md px-1.5 font-mono" variant="secondary">
+                      {provider.count}
+                    </Badge>
+                  </Button>
                 );
               })}
             </div>
           </FacetSection>
-        </aside>
-      ) : (
-        <button
-          aria-label="Expand sidebar"
-          className="sidebar-reopen"
-          onClick={() => setSidebarOpen(true)}
-          title="Expand sidebar"
-          type="button"
-        >
-          <span aria-hidden="true">›</span>
-        </button>
-      )}
+        </SidebarContent>
+        <SidebarRail />
+      </Sidebar>
 
-      <section className="console-main">
-        <header className="topbar">
-          <div className="result-summary">
-            <strong>{filteredRows.length}</strong>
-            <span>models</span>
-            <span>/</span>
-            <span>{rows.length}</span>
-            <span>·</span>
-            <span>{activeFilterCount} active filters</span>
+      <SidebarInset className="h-svh min-w-0 overflow-hidden">
+        <header className="flex min-h-20 flex-col gap-3 border-b bg-background/95 p-3 md:flex-row md:items-center md:justify-between md:px-5">
+          <div className="flex min-w-0 items-center gap-3">
+            <SidebarTrigger />
+            <div className="flex min-w-0 flex-wrap items-center gap-2 font-mono text-sm text-muted-foreground">
+              <Badge className="font-mono" variant="default">
+                {filteredRows.length}
+              </Badge>
+              <span>models</span>
+              <span>/</span>
+              <span>{rows.length}</span>
+              <Separator className="h-4" orientation="vertical" />
+              <span>{activeFilterCount} active filters</span>
+            </div>
           </div>
 
-          <div className="topbar-actions">
+          <div className="flex flex-wrap items-center gap-2">
             <ColumnPicker
               columnSearch={columnSearch}
               columns={columns}
@@ -1894,20 +2029,36 @@ export function ModelsTable({
               onShowAll={showAllColumns}
               onToggle={toggleColumn}
             />
-            <a href={SOURCE_URL} rel="noreferrer" target="_blank">
+            <a
+              className={buttonVariants({ variant: "outline", size: "sm" })}
+              href={SOURCE_URL}
+              rel="noreferrer"
+              target="_blank"
+            >
+              <DatabaseIcon data-icon="inline-start" />
               Source JSON
             </a>
-            <button disabled={isLoading} onClick={loadData} type="button">
+            <Button disabled={isLoading} onClick={loadData} size="sm" type="button" variant="outline">
+              {isLoading ? (
+                <Spinner data-icon="inline-start" />
+              ) : (
+                <RefreshCwIcon data-icon="inline-start" />
+              )}
               {isLoading ? "Refreshing" : "Refresh"}
-            </button>
+            </Button>
+            <ModeToggle />
           </div>
         </header>
 
-        {error ? <div className="console-error">{error}</div> : null}
+        {error ? (
+          <div className="border-b border-destructive/30 bg-destructive/10 px-5 py-2 font-mono text-xs text-destructive">
+            {error}
+          </div>
+        ) : null}
 
-        <div className="results-scroll-x">
-          <div className="table-head" style={{ minWidth: `${gridWidth}px` }}>
-            <div className="table-header" style={{ gridTemplateColumns: gridTemplate }}>
+        <div className="grid min-h-0 flex-1 grid-rows-[auto_minmax(0,1fr)] overflow-x-auto overflow-y-hidden">
+          <div className="sticky top-0 z-10 border-b bg-background" style={{ minWidth: `${gridWidth}px` }}>
+            <div className="grid min-h-16 items-center px-3" style={{ gridTemplateColumns: gridTemplate }}>
               {visibleColumns.map((column) => (
                 <HeaderButton
                   activeSort={sort}
@@ -1920,7 +2071,7 @@ export function ModelsTable({
                 </HeaderButton>
               ))}
             </div>
-            <div className="table-filter-row" style={{ gridTemplateColumns: gridTemplate }}>
+            <div className="grid min-h-14 px-3 py-2" style={{ gridTemplateColumns: gridTemplate }}>
               {visibleColumns.map((column) => (
                 <ColumnFilterControl
                   booleanMode={columnBooleanFilters[column.key] ?? "any"}
@@ -1958,12 +2109,24 @@ export function ModelsTable({
             </div>
           </div>
 
-          <div className="table-scroll" ref={tableScrollRef} style={{ minWidth: `${gridWidth}px` }}>
+          <div
+            className="min-h-0 overflow-x-hidden overflow-y-auto"
+            ref={tableScrollRef}
+            style={{ minWidth: `${gridWidth}px` }}
+          >
             {filteredRows.length === 0 ? (
-              <div className="empty-state">{"// no models match the active query"}</div>
+              <Empty className="h-full min-h-72 border-0">
+                <EmptyHeader>
+                  <EmptyMedia variant="icon">
+                    <SearchIcon />
+                  </EmptyMedia>
+                  <EmptyTitle>No models match</EmptyTitle>
+                  <EmptyDescription>Clear or loosen the active filters.</EmptyDescription>
+                </EmptyHeader>
+              </Empty>
             ) : (
               <div
-                className="virtual-space"
+                className="relative min-w-0"
                 style={{ height: `${rowVirtualizer.getTotalSize()}px`, minWidth: `${gridWidth}px` }}
               >
                 {rowVirtualizer.getVirtualItems().map((virtualRow) => {
@@ -1984,17 +2147,18 @@ export function ModelsTable({
           </div>
         </div>
 
-        <footer className="status-bar">
-          <span className="ready">READY</span>
+        <footer className="flex min-h-10 items-center gap-4 overflow-x-auto whitespace-nowrap border-t bg-background px-5 py-2 font-mono text-[11px] text-muted-foreground">
+          <Badge className="font-mono" variant="secondary">
+            READY
+          </Badge>
           <span>rows {filteredRows.length}</span>
           <span>
             sort {sort.key} {sort.direction}
           </span>
           <span>columns {visibleColumns.length}</span>
-          <span className="updated">{updatedAt ? `fetched ${updatedAt}` : ""}</span>
-          <span className="hint">click headers to sort · filters stack</span>
+          <span className="min-w-0 truncate">{updatedAt ? `fetched ${updatedAt}` : ""}</span>
         </footer>
-      </section>
-    </main>
+      </SidebarInset>
+    </SidebarProvider>
   );
 }
