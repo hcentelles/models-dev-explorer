@@ -1612,8 +1612,20 @@ export function ModelsTable({
     overscan: 12,
   });
 
+  function clearPersistedFilters() {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    window.localStorage.removeItem(FILTER_STORAGE_KEY);
+    const nextUrl = new URL(window.location.href);
+    nextUrl.searchParams.delete("filters");
+    window.history.replaceState(null, "", nextUrl);
+  }
+
   function clearFilters() {
     setQ("");
+    setColumnSearch("");
     setColumnFilters({});
     setColumnEmptyFilters({});
     setColumnBooleanFilters({});
@@ -1634,6 +1646,10 @@ export function ModelsTable({
     setReleaseAfter("");
     setReleaseBefore("");
     setProviderApiFilter("");
+    setSort({ key: "model.release_date", direction: "desc" });
+    setVisibleColumnKeys(new Set(defaultColumnKeys.filter((key) => columnMap.has(key))));
+    setSidebarOpen(true);
+    clearPersistedFilters();
   }
 
   function showDefaultColumns() {
@@ -1687,11 +1703,11 @@ export function ModelsTable({
             />
           </label>
 
-          {activeFilterCount > 0 ? (
-            <button className="clear-filters" onClick={clearFilters} type="button">
-              clear {activeFilterCount} filters
-            </button>
-          ) : null}
+          <button className="clear-filters" onClick={clearFilters} type="button">
+            {activeFilterCount > 0
+              ? `clean all filters (${activeFilterCount})`
+              : "clean all filters"}
+          </button>
 
           <FacetSection title="capabilities">
             {capabilityOptions.map((capability) => (
