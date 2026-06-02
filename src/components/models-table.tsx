@@ -1210,12 +1210,12 @@ function ColumnFilterControl({
   const hasModeFilter = emptyMode !== "any";
   const hasBooleanFilter = booleanMode !== "any";
   const hasFreeFilter = costFreeMode !== "include";
-  const compactColumn = column.width < 125;
+  const compactColumn = column.width < 165;
   const filterShellClassName =
-    "rounded-full border bg-muted/25 transition-colors focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/40";
+    "w-full overflow-hidden rounded-full border bg-muted/25 transition-colors focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/40";
   const activeShellClassName = "border-primary/60 bg-primary/5";
   const nativeSelectClassName =
-    "[&_[data-slot=native-select]]:h-7 [&_[data-slot=native-select]]:rounded-full [&_[data-slot=native-select]]:border-0 [&_[data-slot=native-select]]:bg-transparent [&_[data-slot=native-select]]:px-2 [&_[data-slot=native-select]]:pr-6 [&_[data-slot=native-select]]:font-mono [&_[data-slot=native-select]]:text-[11px] [&_[data-slot=native-select-icon]]:right-2";
+    "min-w-0 [&_[data-slot=native-select]]:h-7 [&_[data-slot=native-select]]:truncate [&_[data-slot=native-select]]:rounded-full [&_[data-slot=native-select]]:border-0 [&_[data-slot=native-select]]:bg-transparent [&_[data-slot=native-select]]:px-2 [&_[data-slot=native-select]]:pr-6 [&_[data-slot=native-select]]:font-mono [&_[data-slot=native-select]]:text-[11px] [&_[data-slot=native-select-icon]]:right-2";
 
   if (column.kind === "boolean") {
     return (
@@ -1250,7 +1250,7 @@ function ColumnFilterControl({
           (hasTextFilter || hasModeFilter || hasFreeFilter) && activeShellClassName,
         )}
       >
-        <InputGroup className="h-8 flex-1 border-0 bg-transparent shadow-none ring-0">
+        <InputGroup className="h-8 w-auto min-w-0 flex-1 basis-0 border-0 bg-transparent shadow-none ring-0">
           <InputGroupInput
             aria-label={`Filter ${column.label}`}
             className="h-8 px-2 font-mono text-[12px]"
@@ -1271,7 +1271,7 @@ function ColumnFilterControl({
             </InputGroupAddon>
           ) : null}
         </InputGroup>
-        <Separator className="h-4" orientation="vertical" />
+        <Separator className="h-4 shrink-0" orientation="vertical" />
         <NativeSelect
           aria-label={`Empty filter ${column.label}`}
           className={cn(
@@ -1289,7 +1289,7 @@ function ColumnFilterControl({
         </NativeSelect>
         {isCostColumn ? (
           <>
-            <Separator className="h-4" orientation="vertical" />
+            <Separator className="h-4 shrink-0" orientation="vertical" />
             <NativeSelect
               aria-label={`Free filter ${column.label}`}
               className={cn(
