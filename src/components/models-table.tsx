@@ -17,7 +17,6 @@ import {
 import { ModeToggle } from "@/components/mode-toggle";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -962,6 +961,13 @@ function FacetCheckbox({
   label: string;
   onChange: () => void;
 }) {
+  function handleFieldClick(event: React.MouseEvent<HTMLDivElement>) {
+    if ((event.target as HTMLElement).closest('[data-slot="checkbox"]')) {
+      return;
+    }
+    onChange();
+  }
+
   return (
     <Field
       className={cn(
@@ -969,13 +975,22 @@ function FacetCheckbox({
         checked && "bg-sidebar-accent text-sidebar-accent-foreground",
       )}
       orientation="horizontal"
-      onClick={onChange}
+      onClick={handleFieldClick}
     >
-      <Checkbox
-        checked={checked}
-        onCheckedChange={onChange}
-        onClick={(event) => event.stopPropagation()}
-      />
+      <button
+        aria-checked={checked}
+        className="peer relative flex size-4 shrink-0 items-center justify-center rounded-[4px] border border-input transition-colors outline-none after:absolute after:-inset-x-3 after:-inset-y-2 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 data-checked:border-primary data-checked:bg-primary data-checked:text-primary-foreground"
+        data-checked={checked ? "" : undefined}
+        data-slot="checkbox"
+        onClick={(event) => {
+          event.stopPropagation();
+          onChange();
+        }}
+        role="checkbox"
+        type="button"
+      >
+        {checked ? <CheckIcon aria-hidden="true" /> : null}
+      </button>
       <FieldLabel className="min-w-0 flex-1 cursor-pointer font-mono text-xs">
         {label}
       </FieldLabel>
