@@ -5,6 +5,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   ArrowDownIcon,
   ArrowUpIcon,
+  CheckIcon,
   Columns3Icon,
   DatabaseIcon,
   PanelLeftIcon,
@@ -67,6 +68,9 @@ const DEFAULT_MIN_CONTEXT = 0;
 const INPUT_PRICE_SCALE = 15;
 const OUTPUT_PRICE_SCALE = 120;
 const FILTER_STORAGE_KEY = "models-dev-explorer-filters-v1";
+const COLUMN_WIDTH_STORAGE_KEY = "models-dev-explorer-column-widths-v1";
+const MIN_COLUMN_WIDTH = 76;
+const MAX_COLUMN_WIDTH = 460;
 
 type Primitive = string | number | boolean | null | undefined;
 type JsonValue = Primitive | JsonValue[] | { [key: string]: JsonValue };
@@ -366,13 +370,13 @@ function labelForColumn(key: string) {
 }
 
 function widthForColumn(key: string, label: string) {
-  if (key === "model.capabilities") return 245;
-  if (key === "model.name" || key === "model.id") return 220;
-  if (key === "provider.name" || key === "provider.id") return 165;
-  if (key.includes(".cost.")) return 98;
-  if (key.includes(".limit.")) return 112;
-  if (key.includes("date") || key.includes("updated")) return 124;
-  if (key.includes("modalities")) return 150;
+  if (key === "model.capabilities") return 260;
+  if (key === "model.name" || key === "model.id") return 230;
+  if (key === "provider.name" || key === "provider.id") return 175;
+  if (key.includes(".cost.")) return 148;
+  if (key.includes(".limit.")) return 142;
+  if (key.includes("date") || key.includes("updated")) return 144;
+  if (key.includes("modalities")) return 160;
   return Math.max(150, Math.min(260, label.length * 8));
 }
 
@@ -822,6 +826,31 @@ function parsePersistedFilterState(value: string | null): PersistedFilterState |
   }
 }
 
+function clampColumnWidth(value: number) {
+  return Math.max(MIN_COLUMN_WIDTH, Math.min(MAX_COLUMN_WIDTH, Math.round(value)));
+}
+
+function parseColumnWidths(value: string | null): Record<string, number> {
+  if (!value) {
+    return {};
+  }
+
+  try {
+    const parsed = JSON.parse(value) as Record<string, unknown>;
+    if (!parsed || typeof parsed !== "object") {
+      return {};
+    }
+
+    return Object.fromEntries(
+      Object.entries(parsed)
+        .filter(([, width]) => typeof width === "number" && Number.isFinite(width))
+        .map(([key, width]) => [key, clampColumnWidth(width as number)]),
+    );
+  } catch {
+    return {};
+  }
+}
+
 function CapabilityChip({
   glyph,
   isOn,
@@ -871,7 +900,7 @@ function HeaderButton({
   return (
     <Button
       className={cn(
-        "h-auto min-h-10 justify-start whitespace-normal rounded-md px-2 py-1.5 text-left font-mono text-[11px] uppercase leading-tight text-muted-foreground",
+        "h-auto min-h-12 w-full justify-start whitespace-normal rounded-md px-2 py-1.5 text-left font-mono text-[11px] uppercase leading-tight text-muted-foreground",
         align === "right" && "justify-end text-right",
         active && "text-foreground",
       )}
@@ -880,7 +909,7 @@ function HeaderButton({
       type="button"
       variant="ghost"
     >
-      <span className="min-w-0 truncate">{children}</span>
+      <span className="min-w-0 break-words">{children}</span>
       {active ? (
         activeSort.direction === "asc" ? (
           <ArrowUpIcon data-icon="inline-end" />
@@ -889,6 +918,47 @@ function HeaderButton({
         )
       ) : null}
     </Button>
+  );
+}
+
+function HeaderCell({
+  activeSort,
+  column,
+  children,
+  onResizeReset,
+  onResizeStart,
+  onSort,
+}: {
+  activeSort: SortState;
+  column: ColumnDef;
+  children: React.ReactNode;
+  onResizeReset: (column: ColumnDef) => void;
+  onResizeStart: (event: React.PointerEvent<HTMLButtonElement>, column: ColumnDef) => void;
+  onSort: (key: string) => void;
+}) {
+  return (
+    <div className="group/header relative flex min-w-0 items-stretch border-r px-1">
+      <HeaderButton
+        activeSort={activeSort}
+        align={column.align}
+        sortKey={column.key}
+        onSort={onSort}
+      >
+        {children}
+      </HeaderButton>
+      <button
+        aria-label={`Resize ${column.label}`}
+        className="absolute right-0 top-0 h-full w-2 translate-x-1 cursor-col-resize rounded-sm opacity-0 outline-none transition-opacity hover:bg-primary/30 hover:opacity-100 focus-visible:bg-primary/30 focus-visible:opacity-100 group-hover/header:opacity-100"
+        onDoubleClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          onResizeReset(column);
+        }}
+        onPointerDown={(event) => onResizeStart(event, column)}
+        title="Drag to resize column"
+        type="button"
+      />
+    </div>
   );
 }
 
@@ -902,11 +972,26 @@ function FacetCheckbox({
   onChange: () => void;
 }) {
   return (
-    <Field orientation="horizontal">
-      <Checkbox checked={checked} onCheckedChange={onChange} />
-      <FieldLabel className="min-w-0 flex-1 cursor-pointer font-mono text-xs text-sidebar-foreground/80">
+    <Field
+      className={cn(
+        "cursor-pointer rounded-md px-1 py-0.5 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+        checked && "bg-sidebar-accent text-sidebar-accent-foreground",
+      )}
+      orientation="horizontal"
+      onClick={onChange}
+    >
+      <Checkbox
+        checked={checked}
+        onCheckedChange={onChange}
+        onClick={(event) => event.stopPropagation()}
+      />
+      <FieldLabel className="min-w-0 flex-1 cursor-pointer font-mono text-xs">
         {label}
       </FieldLabel>
+      <CheckIcon
+        className={cn("ml-auto size-3.5 shrink-0 text-primary transition-opacity", checked ? "opacity-100" : "opacity-0")}
+        aria-hidden="true"
+      />
     </Field>
   );
 }
@@ -1127,14 +1212,14 @@ function ColumnFilterControl({
   const hasFreeFilter = costFreeMode !== "include";
   const compactColumn = column.width < 125;
   const filterShellClassName =
-    "rounded-full border bg-muted/25 shadow-sm transition-colors focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/40";
+    "rounded-full border bg-muted/25 transition-colors focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/40";
   const activeShellClassName = "border-primary/60 bg-primary/5";
   const nativeSelectClassName =
-    "[&_[data-slot=native-select]]:h-7 [&_[data-slot=native-select]]:rounded-full [&_[data-slot=native-select]]:border-0 [&_[data-slot=native-select]]:bg-transparent [&_[data-slot=native-select]]:px-3 [&_[data-slot=native-select]]:pr-7 [&_[data-slot=native-select]]:font-mono [&_[data-slot=native-select]]:text-[11px] [&_[data-slot=native-select-icon]]:right-2";
+    "[&_[data-slot=native-select]]:h-7 [&_[data-slot=native-select]]:rounded-full [&_[data-slot=native-select]]:border-0 [&_[data-slot=native-select]]:bg-transparent [&_[data-slot=native-select]]:px-2 [&_[data-slot=native-select]]:pr-6 [&_[data-slot=native-select]]:font-mono [&_[data-slot=native-select]]:text-[11px] [&_[data-slot=native-select-icon]]:right-2";
 
   if (column.kind === "boolean") {
     return (
-      <div className="pr-2">
+      <div>
         <NativeSelect
           aria-label={`Boolean filter ${column.label}`}
           className={cn(
@@ -1157,26 +1242,23 @@ function ColumnFilterControl({
   }
 
   return (
-    <div className="flex min-w-0 flex-col gap-1 pr-2">
+    <div>
       <div
         className={cn(
           "flex min-w-0 items-center",
           filterShellClassName,
-          (hasTextFilter || hasModeFilter) && activeShellClassName,
+          (hasTextFilter || hasModeFilter || hasFreeFilter) && activeShellClassName,
         )}
       >
         <InputGroup className="h-8 flex-1 border-0 bg-transparent shadow-none ring-0">
           <InputGroupInput
             aria-label={`Filter ${column.label}`}
-            className="h-8 px-1 font-mono text-[12px]"
+            className="h-8 px-2 font-mono text-[12px]"
             onChange={(event) => onTextChange(event.target.value)}
             placeholder=""
             type="search"
             value={textValue}
           />
-          <InputGroupAddon align="inline-start" className="pl-2 pr-1">
-            <SearchIcon />
-          </InputGroupAddon>
           {hasTextFilter ? (
             <InputGroupAddon align="inline-end" className="pl-0 pr-1">
               <InputGroupButton
@@ -1205,25 +1287,27 @@ function ColumnFilterControl({
           <NativeSelectOption value="filled">filled</NativeSelectOption>
           <NativeSelectOption value="empty">empty</NativeSelectOption>
         </NativeSelect>
+        {isCostColumn ? (
+          <>
+            <Separator className="h-4" orientation="vertical" />
+            <NativeSelect
+              aria-label={`Free filter ${column.label}`}
+              className={cn(
+                compactColumn ? "w-[58px] shrink-0" : "w-[68px] shrink-0",
+                nativeSelectClassName,
+                hasFreeFilter && "[&_[data-slot=native-select]]:text-foreground",
+              )}
+              onChange={(event) => onCostFreeModeChange(event.target.value as CostFreeMode)}
+              size="sm"
+              value={costFreeMode}
+            >
+              <NativeSelectOption value="include">any</NativeSelectOption>
+              <NativeSelectOption value="exclude">paid</NativeSelectOption>
+              <NativeSelectOption value="only">free</NativeSelectOption>
+            </NativeSelect>
+          </>
+        ) : null}
       </div>
-      {isCostColumn ? (
-        <NativeSelect
-          aria-label={`Free filter ${column.label}`}
-          className={cn(
-            "w-full",
-            filterShellClassName,
-            nativeSelectClassName,
-            hasFreeFilter && activeShellClassName,
-          )}
-          onChange={(event) => onCostFreeModeChange(event.target.value as CostFreeMode)}
-          size="sm"
-          value={costFreeMode}
-        >
-          <NativeSelectOption value="include">any</NativeSelectOption>
-          <NativeSelectOption value="exclude">paid</NativeSelectOption>
-          <NativeSelectOption value="only">free</NativeSelectOption>
-        </NativeSelect>
-      ) : null}
     </div>
   );
 }
@@ -1369,7 +1453,7 @@ function ModelResultRow({
       {columns.map((column) => (
         <div
           className={cn(
-            "min-w-0 truncate px-2",
+            "min-w-0 truncate border-r px-2",
             column.align === "right" && "text-right tabular-nums",
             column.key === "model.family" && "text-muted-foreground",
           )}
@@ -1438,6 +1522,8 @@ export function ModelsTable({
   const [providerApiFilter, setProviderApiFilter] = useState("");
   const [sort, setSort] = useState<SortState>({ key: "model.release_date", direction: "desc" });
   const [hasLoadedPersistedFilters, setHasLoadedPersistedFilters] = useState(false);
+  const [columnWidths, setColumnWidths] = useState<Record<string, number>>({});
+  const [hasLoadedColumnWidths, setHasLoadedColumnWidths] = useState(false);
   const tableScrollRef = useRef<HTMLDivElement>(null);
 
   const currentPersistedState = useCallback((): PersistedFilterState => {
@@ -1559,6 +1645,11 @@ export function ModelsTable({
   }, [applyPersistedState]);
 
   useEffect(() => {
+    setColumnWidths(parseColumnWidths(window.localStorage.getItem(COLUMN_WIDTH_STORAGE_KEY)));
+    setHasLoadedColumnWidths(true);
+  }, []);
+
+  useEffect(() => {
     if (!hasLoadedPersistedFilters) {
       return;
     }
@@ -1612,12 +1703,40 @@ export function ModelsTable({
     [payload],
   );
   const columnMap = useMemo(() => new Map(columns.map((column) => [column.key, column])), [columns]);
+
+  useEffect(() => {
+    if (!hasLoadedColumnWidths) {
+      return;
+    }
+
+    const persistedWidths = Object.fromEntries(
+      Object.entries(columnWidths).filter(([key, width]) => {
+        const column = columnMap.get(key);
+        return column && clampColumnWidth(width) !== column.width;
+      }),
+    );
+
+    if (Object.keys(persistedWidths).length > 0) {
+      window.localStorage.setItem(COLUMN_WIDTH_STORAGE_KEY, JSON.stringify(persistedWidths));
+    } else {
+      window.localStorage.removeItem(COLUMN_WIDTH_STORAGE_KEY);
+    }
+  }, [columnMap, columnWidths, hasLoadedColumnWidths]);
+
   const visibleColumns = useMemo(() => {
     const selected = [...visibleColumnKeys]
       .map((key) => columnMap.get(key))
+      .map((column) =>
+        column
+          ? {
+              ...column,
+              width: clampColumnWidth(columnWidths[column.key] ?? column.width),
+            }
+          : column,
+      )
       .filter((column): column is ColumnDef => Boolean(column));
     return selected.length > 0 ? selected : columns.slice(0, 1);
-  }, [columnMap, columns, visibleColumnKeys]);
+  }, [columnMap, columnWidths, columns, visibleColumnKeys]);
   const gridTemplate = visibleColumns.map((column) => `${column.width}px`).join(" ");
   const gridWidth = visibleColumns.reduce((total, column) => total + column.width, 0);
   const activeFilterCount = countActiveFilters({
@@ -1827,6 +1946,48 @@ export function ModelsTable({
     });
   }
 
+  function resetColumnWidth(column: ColumnDef) {
+    setColumnWidths((current) => {
+      if (!(column.key in current)) {
+        return current;
+      }
+
+      const next = { ...current };
+      delete next[column.key];
+      return next;
+    });
+  }
+
+  function startColumnResize(event: React.PointerEvent<HTMLButtonElement>, column: ColumnDef) {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const startX = event.clientX;
+    const startWidth = column.width;
+    const previousCursor = document.body.style.cursor;
+    const previousUserSelect = document.body.style.userSelect;
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+
+    function handlePointerMove(pointerEvent: PointerEvent) {
+      const nextWidth = clampColumnWidth(startWidth + pointerEvent.clientX - startX);
+      setColumnWidths((current) => ({
+        ...current,
+        [column.key]: nextWidth,
+      }));
+    }
+
+    function handlePointerUp() {
+      document.body.style.cursor = previousCursor;
+      document.body.style.userSelect = previousUserSelect;
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+    }
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp, { once: true });
+  }
+
   return (
     <SidebarProvider
       className="h-svh overflow-hidden bg-background text-foreground"
@@ -2009,6 +2170,7 @@ export function ModelsTable({
                   >
                     <span className="block size-2 rounded-sm bg-muted-foreground/50" />
                     <span className="min-w-0 flex-1 truncate text-left">{family}</span>
+                    {selected ? <CheckIcon data-icon="inline-end" /> : null}
                   </Button>
                 );
               })}
@@ -2054,6 +2216,7 @@ export function ModelsTable({
                     <Badge className="h-5 rounded-md px-1.5 font-mono" variant="secondary">
                       {provider.count}
                     </Badge>
+                    {selected ? <CheckIcon data-icon="inline-end" /> : null}
                   </Button>
                 );
               })}
@@ -2118,56 +2281,58 @@ export function ModelsTable({
 
         <div className="grid min-h-0 flex-1 grid-rows-[auto_minmax(0,1fr)] overflow-x-auto overflow-y-hidden">
           <div className="sticky top-0 z-10 border-b bg-background" style={{ minWidth: `${gridWidth}px` }}>
-            <div className="grid min-h-16 items-center px-3" style={{ gridTemplateColumns: gridTemplate }}>
+            <div className="grid min-h-16 items-stretch border-t" style={{ gridTemplateColumns: gridTemplate }}>
               {visibleColumns.map((column) => (
-                <HeaderButton
+                <HeaderCell
                   activeSort={sort}
-                  align={column.align}
+                  column={column}
                   key={column.key}
-                  sortKey={column.key}
+                  onResizeReset={resetColumnWidth}
+                  onResizeStart={startColumnResize}
                   onSort={(key) => setSort(nextSort(sort, key))}
                 >
                   {column.label}
-                </HeaderButton>
+                </HeaderCell>
               ))}
             </div>
             <div
-              className="grid min-h-20 items-start border-t bg-muted/10 px-3 py-3"
+              className="grid min-h-14 items-center border-t bg-muted/10"
               style={{ gridTemplateColumns: gridTemplate }}
             >
               {visibleColumns.map((column) => (
-                <ColumnFilterControl
-                  booleanMode={columnBooleanFilters[column.key] ?? "any"}
-                  column={column}
-                  costFreeMode={costFreeFilters[column.key] ?? "include"}
-                  emptyMode={columnEmptyFilters[column.key] ?? "any"}
-                  key={column.key}
-                  textValue={columnFilters[column.key] ?? ""}
-                  onBooleanModeChange={(value) =>
-                    setColumnBooleanFilters((current) => ({
-                      ...current,
-                      [column.key]: value,
-                    }))
-                  }
-                  onCostFreeModeChange={(value) =>
-                    setCostFreeFilters((current) => ({
-                      ...current,
-                      [column.key]: value,
-                    }))
-                  }
-                  onEmptyModeChange={(value) =>
-                    setColumnEmptyFilters((current) => ({
-                      ...current,
-                      [column.key]: value,
-                    }))
-                  }
-                  onTextChange={(value) =>
-                    setColumnFilters((current) => ({
-                      ...current,
-                      [column.key]: value,
-                    }))
-                  }
-                />
+                <div className="min-w-0 border-r px-2 py-2" key={column.key}>
+                  <ColumnFilterControl
+                    booleanMode={columnBooleanFilters[column.key] ?? "any"}
+                    column={column}
+                    costFreeMode={costFreeFilters[column.key] ?? "include"}
+                    emptyMode={columnEmptyFilters[column.key] ?? "any"}
+                    textValue={columnFilters[column.key] ?? ""}
+                    onBooleanModeChange={(value) =>
+                      setColumnBooleanFilters((current) => ({
+                        ...current,
+                        [column.key]: value,
+                      }))
+                    }
+                    onCostFreeModeChange={(value) =>
+                      setCostFreeFilters((current) => ({
+                        ...current,
+                        [column.key]: value,
+                      }))
+                    }
+                    onEmptyModeChange={(value) =>
+                      setColumnEmptyFilters((current) => ({
+                        ...current,
+                        [column.key]: value,
+                      }))
+                    }
+                    onTextChange={(value) =>
+                      setColumnFilters((current) => ({
+                        ...current,
+                        [column.key]: value,
+                      }))
+                    }
+                  />
+                </div>
               ))}
             </div>
           </div>
