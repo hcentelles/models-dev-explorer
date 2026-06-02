@@ -47,14 +47,20 @@ import { Separator } from "@/components/ui/separator";
 import {
   Sidebar,
   SidebarContent,
+  SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
   SidebarGroupLabel,
   SidebarHeader,
   SidebarInset,
   SidebarInput,
+  SidebarMenu,
+  SidebarMenuBadge,
+  SidebarMenuButton,
+  SidebarMenuItem,
   SidebarProvider,
   SidebarRail,
+  SidebarSeparator,
   SidebarTrigger,
 } from "@/components/ui/sidebar";
 import { Spinner } from "@/components/ui/spinner";
@@ -987,6 +993,42 @@ function FacetSection({ children, title }: { children: React.ReactNode; title: s
       <SidebarGroupLabel className="font-mono uppercase tracking-wide">{title}</SidebarGroupLabel>
       <SidebarGroupContent className="flex flex-col gap-2">{children}</SidebarGroupContent>
     </SidebarGroup>
+  );
+}
+
+function SidebarFacetItem({
+  badge,
+  color,
+  label,
+  selected,
+  onSelect,
+}: {
+  badge?: number;
+  color?: string;
+  label: string;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <SidebarMenuItem>
+      <SidebarMenuButton
+        className={cn("font-mono", badge !== undefined && "pr-10")}
+        isActive={selected}
+        onClick={onSelect}
+        size="sm"
+        type="button"
+      >
+        <span
+          className="block size-2 rounded-sm bg-muted-foreground/50"
+          style={color ? { background: color } : undefined}
+        />
+        <span className="min-w-0 flex-1 truncate">{label}</span>
+        {selected ? <CheckIcon /> : null}
+      </SidebarMenuButton>
+      {badge !== undefined ? (
+        <SidebarMenuBadge className="font-mono">{badge}</SidebarMenuBadge>
+      ) : null}
+    </SidebarMenuItem>
   );
 }
 
@@ -1942,18 +1984,22 @@ export function ModelsTable({
       }
     >
       <Sidebar collapsible="offcanvas" className="border-sidebar-border">
-        <SidebarHeader className="gap-3 border-b border-sidebar-border p-3">
-          <div className="flex items-center gap-3">
-            <div className="grid size-9 shrink-0 place-items-center rounded-lg bg-primary font-mono text-sm font-semibold text-primary-foreground">
-              md
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="truncate font-mono text-sm font-semibold">models.dev</div>
-              <div className="truncate font-mono text-[10px] uppercase tracking-wide text-muted-foreground">
-                catalog explorer
-              </div>
-            </div>
-          </div>
+        <SidebarHeader className="gap-3 border-b border-sidebar-border p-2">
+          <SidebarMenu>
+            <SidebarMenuItem>
+              <SidebarMenuButton className="h-14 cursor-default font-mono" render={<div />} size="lg">
+                <div className="grid size-9 shrink-0 place-items-center rounded-lg bg-primary text-sm font-semibold text-primary-foreground">
+                  md
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-sm font-semibold">models.dev</div>
+                  <div className="truncate text-[10px] uppercase tracking-wide text-muted-foreground">
+                    catalog explorer
+                  </div>
+                </div>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          </SidebarMenu>
           <Field className="gap-1">
             <FieldLabel className="sr-only">Search models</FieldLabel>
             <div className="relative">
@@ -1967,12 +2013,6 @@ export function ModelsTable({
               />
             </div>
           </Field>
-          <Button onClick={clearFilters} size="sm" type="button" variant="outline">
-            <SlidersHorizontalIcon data-icon="inline-start" />
-            {activeFilterCount > 0
-              ? `Clean all filters (${activeFilterCount})`
-              : "Clean all filters"}
-          </Button>
         </SidebarHeader>
 
         <SidebarContent>
@@ -2091,26 +2131,22 @@ export function ModelsTable({
           </FacetSection>
 
           <FacetSection title="families">
-            <div className="flex max-h-44 flex-col gap-1 overflow-auto pr-1">
+            <SidebarMenu className="max-h-44 overflow-auto pr-1">
               {families.slice(0, 80).map((family) => {
                 const selected = selectedFamilies.has(family);
 
                 return (
-                  <Button
-                    className={cn("h-7 justify-start px-2 font-mono text-xs", selected && "bg-sidebar-accent text-sidebar-accent-foreground")}
+                  <SidebarFacetItem
                     key={family}
-                    onClick={() => setSelectedFamilies((current) => toggleSetValue(current, family))}
-                    size="sm"
-                    type="button"
-                    variant="ghost"
-                  >
-                    <span className="block size-2 rounded-sm bg-muted-foreground/50" />
-                    <span className="min-w-0 flex-1 truncate text-left">{family}</span>
-                    {selected ? <CheckIcon data-icon="inline-end" /> : null}
-                  </Button>
+                    label={family}
+                    selected={selected}
+                    onSelect={() =>
+                      setSelectedFamilies((current) => toggleSetValue(current, family))
+                    }
+                  />
                 );
               })}
-            </div>
+            </SidebarMenu>
           </FacetSection>
 
           {statuses.length > 0 ? (
@@ -2131,34 +2167,47 @@ export function ModelsTable({
           ) : null}
 
           <FacetSection title="providers">
-            <div className="flex max-h-52 flex-col gap-1 overflow-auto pr-1">
+            <SidebarMenu className="max-h-52 overflow-auto pr-1">
               {providers.map((provider) => {
                 const selected = selectedProviders.has(provider.id);
                 const color = providerColor(provider.id, provider.name);
 
                 return (
-                  <Button
-                    className={cn("h-7 justify-start px-2 font-mono text-xs", selected && "bg-sidebar-accent text-sidebar-accent-foreground")}
+                  <SidebarFacetItem
+                    badge={provider.count}
+                    color={color}
                     key={provider.id}
-                    onClick={() =>
+                    label={provider.name}
+                    selected={selected}
+                    onSelect={() =>
                       setSelectedProviders((current) => toggleSetValue(current, provider.id))
                     }
-                    size="sm"
-                    type="button"
-                    variant="ghost"
-                  >
-                    <span className="block size-2 rounded-sm" style={{ background: color }} />
-                    <span className="min-w-0 flex-1 truncate text-left">{provider.name}</span>
-                    <Badge className="h-5 rounded-md px-1.5 font-mono" variant="secondary">
-                      {provider.count}
-                    </Badge>
-                    {selected ? <CheckIcon data-icon="inline-end" /> : null}
-                  </Button>
+                  />
                 );
               })}
-            </div>
+            </SidebarMenu>
           </FacetSection>
         </SidebarContent>
+        <SidebarSeparator />
+        <SidebarFooter>
+          <SidebarMenu>
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                className="font-mono"
+                isActive={activeFilterCount > 0}
+                onClick={clearFilters}
+                type="button"
+              >
+                <SlidersHorizontalIcon />
+                <span>
+                  {activeFilterCount > 0
+                    ? `Clean all filters (${activeFilterCount})`
+                    : "Clean all filters"}
+                </span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          </SidebarMenu>
+        </SidebarFooter>
         <SidebarRail />
       </Sidebar>
 
