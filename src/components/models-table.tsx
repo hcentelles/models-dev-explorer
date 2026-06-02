@@ -91,7 +91,7 @@ type SortState = {
 type ColumnKind = "boolean" | "number" | "text";
 type EmptyFilterMode = "any" | "filled" | "empty";
 type BooleanFilterMode = "any" | "true" | "false" | "empty";
-type CostFreeMode = "include" | "exclude" | "only";
+type FreeModelMode = "include" | "exclude" | "only";
 type CapabilityKey = "reasoning" | "tool" | "structured" | "vision" | "cache";
 type ModalityKey = "text" | "image" | "audio";
 type ColumnGroup =
@@ -177,7 +177,8 @@ type PersistedFilterState = {
   sort?: SortState;
   visibleColumnKeys?: string[];
   sidebarOpen?: boolean;
-  costFreeFilters?: Record<string, CostFreeMode>;
+  freeModelMode?: FreeModelMode;
+  costFreeFilters?: Record<string, FreeModelMode>;
 };
 
 const defaultColumnKeys = [
@@ -391,6 +392,10 @@ function isEmptyValue(value: Primitive, formattedValue?: string) {
 
 function cellIsEmpty(row: ModelRow, key: string) {
   return isEmptyValue(row.rawValues[key], row.values[key] ?? "");
+}
+
+function rowHasFreePricing(row: ModelRow) {
+  return row.inputPrice === 0 || row.outputPrice === 0;
 }
 
 function classifyColumn(rows: ModelRow[], key: string): ColumnKind {
@@ -682,7 +687,7 @@ function countActiveFilters({
   columnFilters,
   columnEmptyFilters,
   columnBooleanFilters,
-  costFreeFilters,
+  freeModelMode,
 }: {
   q: string;
   selectedCapabilities: ReadonlySet<CapabilityKey>;
@@ -704,7 +709,7 @@ function countActiveFilters({
   columnFilters: Record<string, string>;
   columnEmptyFilters: Record<string, EmptyFilterMode>;
   columnBooleanFilters: Record<string, BooleanFilterMode>;
-  costFreeFilters: Record<string, CostFreeMode>;
+  freeModelMode: FreeModelMode;
 }) {
   return (
     (q.trim() ? 1 : 0) +
@@ -727,7 +732,7 @@ function countActiveFilters({
     Object.values(columnFilters).filter((value) => value.trim()).length +
     Object.values(columnEmptyFilters).filter((value) => value !== "any").length +
     Object.values(columnBooleanFilters).filter((value) => value !== "any").length +
-    Object.values(costFreeFilters).filter((value) => value !== "include").length
+    (freeModelMode !== "include" ? 1 : 0)
   );
 }
 
@@ -752,6 +757,21 @@ function cleanTextRecord(record: Record<string, string>) {
     .map(([key, value]) => [key, value.trim()] as const)
     .filter(([, value]) => value);
   return entries.length > 0 ? Object.fromEntries(entries) : undefined;
+}
+
+function migrateFreeModelMode(state: PersistedFilterState): FreeModelMode {
+  if (state.freeModelMode) {
+    return state.freeModelMode;
+  }
+
+  const legacyModes = Object.values(state.costFreeFilters ?? {});
+  if (legacyModes.includes("only")) {
+    return "only";
+  }
+  if (legacyModes.includes("exclude")) {
+    return "exclude";
+  }
+  return "include";
 }
 
 function compactFilterState(state: PersistedFilterState): PersistedFilterState {
@@ -806,7 +826,7 @@ function compactFilterState(state: PersistedFilterState): PersistedFilterState {
         ? state.visibleColumnKeys
         : undefined,
     sidebarOpen: state.sidebarOpen === false ? false : undefined,
-    costFreeFilters: cleanRecord(state.costFreeFilters, "include"),
+    freeModelMode: state.freeModelMode && state.freeModelMode !== "include" ? state.freeModelMode : undefined,
   };
 }
 
@@ -1229,29 +1249,23 @@ function ColumnPicker({
 function ColumnFilterControl({
   column,
   booleanMode,
-  costFreeMode,
   emptyMode,
   textValue,
   onBooleanModeChange,
-  onCostFreeModeChange,
   onEmptyModeChange,
   onTextChange,
 }: {
   column: ColumnDef;
   booleanMode: BooleanFilterMode;
-  costFreeMode: CostFreeMode;
   emptyMode: EmptyFilterMode;
   textValue: string;
   onBooleanModeChange: (value: BooleanFilterMode) => void;
-  onCostFreeModeChange: (value: CostFreeMode) => void;
   onEmptyModeChange: (value: EmptyFilterMode) => void;
   onTextChange: (value: string) => void;
 }) {
-  const isCostColumn = column.key.includes(".cost.");
   const hasTextFilter = Boolean(textValue.trim());
   const hasModeFilter = emptyMode !== "any";
   const hasBooleanFilter = booleanMode !== "any";
-  const hasFreeFilter = costFreeMode !== "include";
   const compactColumn = column.width < 165;
   const filterShellClassName =
     "w-full overflow-hidden rounded-full border bg-muted/25 transition-colors focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/40";
@@ -1289,7 +1303,7 @@ function ColumnFilterControl({
         className={cn(
           "flex min-w-0 items-center",
           filterShellClassName,
-          (hasTextFilter || hasModeFilter || hasFreeFilter) && activeShellClassName,
+          (hasTextFilter || hasModeFilter) && activeShellClassName,
         )}
       >
         <InputGroup className="h-8 w-auto min-w-0 flex-1 basis-0 border-0 bg-transparent shadow-none ring-0">
@@ -1329,26 +1343,6 @@ function ColumnFilterControl({
           <NativeSelectOption value="filled">filled</NativeSelectOption>
           <NativeSelectOption value="empty">empty</NativeSelectOption>
         </NativeSelect>
-        {isCostColumn ? (
-          <>
-            <Separator className="h-4 shrink-0" orientation="vertical" />
-            <NativeSelect
-              aria-label={`Free filter ${column.label}`}
-              className={cn(
-                compactColumn ? "w-[58px] shrink-0" : "w-[68px] shrink-0",
-                nativeSelectClassName,
-                hasFreeFilter && "[&_[data-slot=native-select]]:text-foreground",
-              )}
-              onChange={(event) => onCostFreeModeChange(event.target.value as CostFreeMode)}
-              size="sm"
-              value={costFreeMode}
-            >
-              <NativeSelectOption value="include">any</NativeSelectOption>
-              <NativeSelectOption value="exclude">paid</NativeSelectOption>
-              <NativeSelectOption value="only">free</NativeSelectOption>
-            </NativeSelect>
-          </>
-        ) : null}
       </div>
     </div>
   );
@@ -1492,7 +1486,7 @@ export function ModelsTable({
   const [columnBooleanFilters, setColumnBooleanFilters] = useState<
     Record<string, BooleanFilterMode>
   >({});
-  const [costFreeFilters, setCostFreeFilters] = useState<Record<string, CostFreeMode>>({});
+  const [freeModelMode, setFreeModelMode] = useState<FreeModelMode>("include");
   const [visibleColumnKeys, setVisibleColumnKeys] = useState<ReadonlySet<string>>(
     () => new Set(defaultColumnKeys),
   );
@@ -1536,7 +1530,7 @@ export function ModelsTable({
       columnFilters,
       columnEmptyFilters,
       columnBooleanFilters,
-      costFreeFilters,
+      freeModelMode,
       selectedCapabilities: [...selectedCapabilities],
       selectedInputModalities: [...selectedInputModalities],
       selectedOutputModalities: [...selectedOutputModalities],
@@ -1561,7 +1555,7 @@ export function ModelsTable({
     columnBooleanFilters,
     columnEmptyFilters,
     columnFilters,
-    costFreeFilters,
+    freeModelMode,
     maxContextLimit,
     maxInputPrice,
     maxOutputPrice,
@@ -1593,7 +1587,7 @@ export function ModelsTable({
     setColumnFilters(state.columnFilters ?? {});
     setColumnEmptyFilters(state.columnEmptyFilters ?? {});
     setColumnBooleanFilters(state.columnBooleanFilters ?? {});
-    setCostFreeFilters(state.costFreeFilters ?? {});
+    setFreeModelMode(migrateFreeModelMode(state));
     setSelectedCapabilities(new Set(state.selectedCapabilities ?? []));
     setSelectedInputModalities(new Set(state.selectedInputModalities ?? []));
     setSelectedOutputModalities(new Set(state.selectedOutputModalities ?? []));
@@ -1759,7 +1753,7 @@ export function ModelsTable({
     columnFilters,
     columnEmptyFilters,
     columnBooleanFilters,
-    costFreeFilters,
+    freeModelMode,
   });
 
   const filteredRows = useMemo(() => {
@@ -1774,10 +1768,6 @@ export function ModelsTable({
     const activeBooleanFilters = Object.entries(columnBooleanFilters).filter(
       ([, value]) => value !== "any",
     );
-    const activeCostFreeFilters = Object.entries(costFreeFilters).filter(
-      ([, value]) => value !== "include",
-    );
-
     return rows
       .filter((row) => {
         if (normalizedQ && !row.searchText.includes(normalizedQ)) return false;
@@ -1817,6 +1807,11 @@ export function ModelsTable({
         }
         if (releaseAfter && (!row.releaseDate || row.releaseDate < releaseAfter)) return false;
         if (releaseBefore && (!row.releaseDate || row.releaseDate > releaseBefore)) return false;
+        if (freeModelMode !== "include") {
+          const isFree = rowHasFreePricing(row);
+          if (freeModelMode === "only" && !isFree) return false;
+          if (freeModelMode === "exclude" && isFree) return false;
+        }
         if (
           !activeColumnFilters.every(([key, value]) =>
             (row.values[key] ?? "").toLowerCase().includes(value),
@@ -1842,18 +1837,14 @@ export function ModelsTable({
         ) {
           return false;
         }
-        return activeCostFreeFilters.every(([key, value]) => {
-          const rawValue = row.rawValues[key];
-          const isFree = typeof rawValue === "number" && rawValue === 0;
-          return value === "only" ? isFree : !isFree;
-        });
+        return true;
       })
       .sort((a, b) => compareRows(a, b, sort));
   }, [
     columnBooleanFilters,
     columnEmptyFilters,
     columnFilters,
-    costFreeFilters,
+    freeModelMode,
     maxContextLimit,
     maxInputPrice,
     maxOutputPrice,
@@ -1902,7 +1893,7 @@ export function ModelsTable({
     setColumnFilters({});
     setColumnEmptyFilters({});
     setColumnBooleanFilters({});
-    setCostFreeFilters({});
+    setFreeModelMode("include");
     setSelectedCapabilities(new Set());
     setSelectedInputModalities(new Set());
     setSelectedOutputModalities(new Set());
@@ -2100,6 +2091,25 @@ export function ModelsTable({
           </FacetSection>
 
           <FacetSection title="limits and price">
+            <Field className="gap-1.5">
+              <FieldLabel className="font-mono text-[11px] uppercase text-muted-foreground">
+                free models
+              </FieldLabel>
+              <NativeSelect
+                aria-label="Free models filter"
+                className={cn(
+                  "w-full font-mono",
+                  freeModelMode !== "include" && "border-primary/60 bg-primary/5",
+                )}
+                onChange={(event) => setFreeModelMode(event.target.value as FreeModelMode)}
+                size="sm"
+                value={freeModelMode}
+              >
+                <NativeSelectOption value="include">include free</NativeSelectOption>
+                <NativeSelectOption value="exclude">exclude free</NativeSelectOption>
+                <NativeSelectOption value="only">only free</NativeSelectOption>
+              </NativeSelect>
+            </Field>
             <MiniNumberRangeFilter
               label="context"
               max={maxContext}
@@ -2304,17 +2314,10 @@ export function ModelsTable({
                   <ColumnFilterControl
                     booleanMode={columnBooleanFilters[column.key] ?? "any"}
                     column={column}
-                    costFreeMode={costFreeFilters[column.key] ?? "include"}
                     emptyMode={columnEmptyFilters[column.key] ?? "any"}
                     textValue={columnFilters[column.key] ?? ""}
                     onBooleanModeChange={(value) =>
                       setColumnBooleanFilters((current) => ({
-                        ...current,
-                        [column.key]: value,
-                      }))
-                    }
-                    onCostFreeModeChange={(value) =>
-                      setCostFreeFilters((current) => ({
                         ...current,
                         [column.key]: value,
                       }))
