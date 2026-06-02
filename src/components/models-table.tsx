@@ -1167,10 +1167,10 @@ function ColumnPicker({
 
                 return (
                   <DropdownMenuCheckboxItem
-                      checked={checked}
-                      disabled={disabled}
                     key={column.key}
-                      onChange={() => onToggle(column.key)}
+                    checked={checked}
+                    disabled={disabled}
+                    onCheckedChange={() => onToggle(column.key)}
                   >
                     {column.label}
                   </DropdownMenuCheckboxItem>
