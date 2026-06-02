@@ -1724,19 +1724,14 @@ export function ModelsTable({
   }, [columnMap, columnWidths, hasLoadedColumnWidths]);
 
   const visibleColumns = useMemo(() => {
-    const selected = [...visibleColumnKeys]
-      .map((key) => columnMap.get(key))
-      .map((column) =>
-        column
-          ? {
-              ...column,
-              width: clampColumnWidth(columnWidths[column.key] ?? column.width),
-            }
-          : column,
-      )
-      .filter((column): column is ColumnDef => Boolean(column));
+    const selected = columns
+      .filter((column) => visibleColumnKeys.has(column.key))
+      .map((column) => ({
+        ...column,
+        width: clampColumnWidth(columnWidths[column.key] ?? column.width),
+      }));
     return selected.length > 0 ? selected : columns.slice(0, 1);
-  }, [columnMap, columnWidths, columns, visibleColumnKeys]);
+  }, [columnWidths, columns, visibleColumnKeys]);
   const gridTemplate = visibleColumns.map((column) => `${column.width}px`).join(" ");
   const gridWidth = visibleColumns.reduce((total, column) => total + column.width, 0);
   const activeFilterCount = countActiveFilters({
