@@ -8,7 +8,6 @@ import {
   CheckIcon,
   Columns3Icon,
   DatabaseIcon,
-  PanelLeftIcon,
   RefreshCwIcon,
   SearchIcon,
   SlidersHorizontalIcon,
@@ -60,7 +59,6 @@ import {
 } from "@/components/ui/sidebar";
 import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
 const SOURCE_URL = "https://models.dev/api.json";
@@ -1955,12 +1953,6 @@ export function ModelsTable({
                 catalog explorer
               </div>
             </div>
-            <Tooltip>
-              <TooltipTrigger render={<SidebarTrigger aria-label="Collapse sidebar" />}>
-                <PanelLeftIcon />
-              </TooltipTrigger>
-              <TooltipContent>Toggle sidebar</TooltipContent>
-            </Tooltip>
           </div>
           <Field className="gap-1">
             <FieldLabel className="sr-only">Search models</FieldLabel>
