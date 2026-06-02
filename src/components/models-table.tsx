@@ -2308,12 +2308,7 @@ export function ModelsTable({
                 </HeaderCell>
               ))}
             </div>
-            <div
-              className={cn(
-                "sticky left-[calc(50%-var(--filter-toggle-sidebar-offset))] z-20 size-0 overflow-visible [--filter-toggle-sidebar-offset:0px]",
-                sidebarOpen && "md:[--filter-toggle-sidebar-offset:calc(var(--sidebar-width)/2)]",
-              )}
-            >
+            <div className="sticky left-1/2 z-20 size-0 overflow-visible">
               <Button
                 aria-label={columnFiltersVisible ? "Hide column filters" : "Show column filters"}
                 className="-translate-x-1/2 -translate-y-1/2 rounded-full border bg-background shadow-sm"
