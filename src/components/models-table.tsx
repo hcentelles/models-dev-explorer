@@ -65,8 +65,6 @@ import { cn } from "@/lib/utils";
 
 const SOURCE_URL = "https://models.dev/api.json";
 const DEFAULT_MIN_CONTEXT = 0;
-const INPUT_PRICE_SCALE = 15;
-const OUTPUT_PRICE_SCALE = 120;
 const FILTER_STORAGE_KEY = "models-dev-explorer-filters-v1";
 const COLUMN_WIDTH_STORAGE_KEY = "models-dev-explorer-column-widths-v1";
 const MIN_COLUMN_WIDTH = 76;
@@ -871,17 +869,6 @@ function CapabilityChip({
   );
 }
 
-function Bar({ className, value }: { className?: string; value: number }) {
-  return (
-    <span className="mt-1 block h-1 w-16 overflow-hidden rounded-full bg-muted">
-      <span
-        className={cn("block h-full rounded-full bg-primary", className)}
-        style={{ width: `${Math.max(0, Math.min(100, value))}%` }}
-      />
-    </span>
-  );
-}
-
 function HeaderButton({
   activeSort,
   align = "left",
@@ -1312,34 +1299,21 @@ function ColumnFilterControl({
   );
 }
 
-function MetricCell({
-  barClassName,
-  barWidth,
-  className,
-  value,
-}: {
-  barClassName?: string;
-  barWidth: number;
-  className?: string;
-  value: string;
-}) {
+function MetricCell({ className, value }: { className?: string; value: string }) {
   const isNull = value === "null";
 
   return (
     <div className={cn("flex flex-col items-end pr-2 font-mono tabular-nums", className, isNull && "text-muted-foreground")}>
       <span>{value}</span>
-      <Bar className={barClassName} value={barWidth} />
     </div>
   );
 }
 
 function CellValue({
   column,
-  maxContext,
   row,
 }: {
   column: ColumnDef;
-  maxContext: number;
   row: ModelRow;
 }) {
   if (column.key === "provider.name") {
@@ -1383,38 +1357,15 @@ function CellValue({
   }
 
   if (column.key === "model.limit.context") {
-    const width =
-      row.context === null
-        ? 0
-        : (Math.log10(Math.max(1, row.context)) / Math.log10(Math.max(1, maxContext))) * 100;
-
-    return (
-      <MetricCell
-        barWidth={width}
-        className="text-primary"
-        value={formatContext(row.context)}
-      />
-    );
+    return <MetricCell className="text-primary" value={formatContext(row.context)} />;
   }
 
   if (column.key === "model.cost.input") {
-    return (
-      <MetricCell
-        barClassName="bg-chart-2"
-        barWidth={row.inputPrice === null ? 0 : (row.inputPrice / INPUT_PRICE_SCALE) * 100}
-        value={formatPrice(row.inputPrice)}
-      />
-    );
+    return <MetricCell value={formatPrice(row.inputPrice)} />;
   }
 
   if (column.key === "model.cost.output") {
-    return (
-      <MetricCell
-        barClassName="bg-chart-3"
-        barWidth={row.outputPrice === null ? 0 : (row.outputPrice / OUTPUT_PRICE_SCALE) * 100}
-        value={formatPrice(row.outputPrice)}
-      />
-    );
+    return <MetricCell value={formatPrice(row.outputPrice)} />;
   }
 
   if (column.key.includes(".cost.")) {
@@ -1435,13 +1386,11 @@ function CellValue({
 function ModelResultRow({
   columns,
   gridTemplate,
-  maxContext,
   row,
   start,
 }: {
   columns: ColumnDef[];
   gridTemplate: string;
-  maxContext: number;
   row: ModelRow;
   start: number;
 }) {
@@ -1460,7 +1409,7 @@ function ModelResultRow({
           key={`${row.id}:${column.key}`}
           title={row.values[column.key]}
         >
-          <CellValue column={column} maxContext={maxContext} row={row} />
+          <CellValue column={column} row={row} />
         </div>
       ))}
     </div>
@@ -2359,7 +2308,6 @@ export function ModelsTable({
                       columns={visibleColumns}
                       gridTemplate={gridTemplate}
                       key={row.id}
-                      maxContext={maxContext}
                       row={row}
                       start={virtualRow.start}
                     />
