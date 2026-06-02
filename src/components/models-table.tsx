@@ -6,6 +6,8 @@ import {
   ArrowDownIcon,
   ArrowUpIcon,
   CheckIcon,
+  ChevronDownIcon,
+  ChevronUpIcon,
   Columns3Icon,
   DatabaseIcon,
   RefreshCwIcon,
@@ -935,16 +937,22 @@ function HeaderCell({
   activeSort,
   column,
   children,
+  filterRowVisible,
   onResizeReset,
   onResizeStart,
   onSort,
+  onToggleFilterRow,
+  showFilterToggle = false,
 }: {
   activeSort: SortState;
   column: ColumnDef;
   children: React.ReactNode;
+  filterRowVisible: boolean;
   onResizeReset: (column: ColumnDef) => void;
   onResizeStart: (event: React.PointerEvent<HTMLButtonElement>, column: ColumnDef) => void;
   onSort: (key: string) => void;
+  onToggleFilterRow: () => void;
+  showFilterToggle?: boolean;
 }) {
   return (
     <div className="group/header relative flex min-w-0 items-stretch border-r px-1">
@@ -956,6 +964,22 @@ function HeaderCell({
       >
         {children}
       </HeaderButton>
+      {showFilterToggle ? (
+        <Button
+          aria-label={filterRowVisible ? "Hide column filters" : "Show column filters"}
+          className="absolute bottom-0 left-2 translate-y-1/2 rounded-full border bg-background shadow-sm"
+          onClick={(event) => {
+            event.stopPropagation();
+            onToggleFilterRow();
+          }}
+          size="icon-xs"
+          title={filterRowVisible ? "Hide column filters" : "Show column filters"}
+          type="button"
+          variant="outline"
+        >
+          {filterRowVisible ? <ChevronUpIcon /> : <ChevronDownIcon />}
+        </Button>
+      ) : null}
       <button
         aria-label={`Resize ${column.label}`}
         className="absolute right-0 top-0 h-full w-2 translate-x-1 cursor-col-resize rounded-sm opacity-0 outline-none transition-opacity hover:bg-primary/30 hover:opacity-100 focus-visible:bg-primary/30 focus-visible:opacity-100 group-hover/header:opacity-100"
@@ -1486,6 +1510,7 @@ export function ModelsTable({
   const [columnBooleanFilters, setColumnBooleanFilters] = useState<
     Record<string, BooleanFilterMode>
   >({});
+  const [columnFiltersVisible, setColumnFiltersVisible] = useState(true);
   const [freeModelMode, setFreeModelMode] = useState<FreeModelMode>("include");
   const [visibleColumnKeys, setVisibleColumnKeys] = useState<ReadonlySet<string>>(
     () => new Set(defaultColumnKeys),
@@ -2292,52 +2317,57 @@ export function ModelsTable({
         <div className="grid min-h-0 flex-1 grid-rows-[auto_minmax(0,1fr)] overflow-x-auto overflow-y-hidden">
           <div className="sticky top-0 z-10 border-b bg-background" style={{ minWidth: `${gridWidth}px` }}>
             <div className="grid min-h-16 items-stretch border-t" style={{ gridTemplateColumns: gridTemplate }}>
-              {visibleColumns.map((column) => (
+              {visibleColumns.map((column, index) => (
                 <HeaderCell
                   activeSort={sort}
                   column={column}
+                  filterRowVisible={columnFiltersVisible}
                   key={column.key}
                   onResizeReset={resetColumnWidth}
                   onResizeStart={startColumnResize}
                   onSort={(key) => setSort(nextSort(sort, key))}
+                  onToggleFilterRow={() => setColumnFiltersVisible((visible) => !visible)}
+                  showFilterToggle={index === 0}
                 >
                   {column.label}
                 </HeaderCell>
               ))}
             </div>
-            <div
-              className="grid min-h-14 items-center border-t bg-muted/10"
-              style={{ gridTemplateColumns: gridTemplate }}
-            >
-              {visibleColumns.map((column) => (
-                <div className="min-w-0 border-r px-2 py-2" key={column.key}>
-                  <ColumnFilterControl
-                    booleanMode={columnBooleanFilters[column.key] ?? "any"}
-                    column={column}
-                    emptyMode={columnEmptyFilters[column.key] ?? "any"}
-                    textValue={columnFilters[column.key] ?? ""}
-                    onBooleanModeChange={(value) =>
-                      setColumnBooleanFilters((current) => ({
-                        ...current,
-                        [column.key]: value,
-                      }))
-                    }
-                    onEmptyModeChange={(value) =>
-                      setColumnEmptyFilters((current) => ({
-                        ...current,
-                        [column.key]: value,
-                      }))
-                    }
-                    onTextChange={(value) =>
-                      setColumnFilters((current) => ({
-                        ...current,
-                        [column.key]: value,
-                      }))
-                    }
-                  />
-                </div>
-              ))}
-            </div>
+            {columnFiltersVisible ? (
+              <div
+                className="grid min-h-14 items-center border-t bg-muted/10"
+                style={{ gridTemplateColumns: gridTemplate }}
+              >
+                {visibleColumns.map((column) => (
+                  <div className="min-w-0 border-r px-2 py-2" key={column.key}>
+                    <ColumnFilterControl
+                      booleanMode={columnBooleanFilters[column.key] ?? "any"}
+                      column={column}
+                      emptyMode={columnEmptyFilters[column.key] ?? "any"}
+                      textValue={columnFilters[column.key] ?? ""}
+                      onBooleanModeChange={(value) =>
+                        setColumnBooleanFilters((current) => ({
+                          ...current,
+                          [column.key]: value,
+                        }))
+                      }
+                      onEmptyModeChange={(value) =>
+                        setColumnEmptyFilters((current) => ({
+                          ...current,
+                          [column.key]: value,
+                        }))
+                      }
+                      onTextChange={(value) =>
+                        setColumnFilters((current) => ({
+                          ...current,
+                          [column.key]: value,
+                        }))
+                      }
+                    />
+                  </div>
+                ))}
+              </div>
+            ) : null}
           </div>
 
           <div
